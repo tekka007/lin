@@ -5,9 +5,17 @@
 #
 # This file contains the font map for the default (hardware) font
 #
+#
+# /******************************************************************
+# 
+# Includes Intel Corporation's changes/modifications dated: 08/2010.
+# Changed/modified portions - Copyright(c) 2010, Intel Corporation. 
+#
+# ******************************************************************/
+
 FONTMAPFILE = cp437.uni
 
-obj-y	 += mem.o random.o tty_io.o n_tty.o tty_ioctl.o tty_ldisc.o tty_buffer.o tty_port.o
+obj-y	 += devmem.o mem.o random.o tty_io.o n_tty.o tty_ioctl.o tty_ldisc.o tty_buffer.o tty_port.o
 
 obj-$(CONFIG_LEGACY_PTYS)	+= pty.o
 obj-$(CONFIG_UNIX98_PTYS)	+= pty.o

@@ -37,7 +37,7 @@
 #include <linux/io.h>
 
 #include <asm/irq.h>
-#include <plat/i2c.h>
+#include <linux/i2c/pxa-i2c.h>
 
 /*
  * I2C register offsets will be shifted 0 or 1 bit left, depending on
@@ -57,12 +57,6 @@ MODULE_DEVICE_TABLE(platform, i2c_pxa_id_table);
 /*
  * I2C registers and bit definitions
  */
-#define IBMR		(0x00)
-#define IDBR		(0x08)
-#define ICR		(0x10)
-#define ISR		(0x18)
-#define ISAR		(0x20)
-
 #define ICR_START	(1 << 0)	   /* start bit */
 #define ICR_STOP	(1 << 1)	   /* stop bit */
 #define ICR_ACKNAK	(1 << 2)	   /* send ACK(0) or NAK(1) */
@@ -91,6 +85,44 @@ MODULE_DEVICE_TABLE(platform, i2c_pxa_id_table);
 #define ISR_GCAD	(1 << 8)	   /* general call address detected */
 #define ISR_SAD		(1 << 9)	   /* slave address detected */
 #define ISR_BED		(1 << 10)	   /* bus error no ACK/NAK */
+
+/*
+ * I2C registers definitions
+ */
+#ifndef CONFIG_X86
+
+#define IBMR		(0x00)
+#define IDBR		(0x04)
+#define ICR		(0x08)
+#define ISR		(0x0c)
+#define ISAR		(0x10)
+
+#define _IBMR(i2c)	((i2c)->reg_base + (IBMR << (i2c)->reg_shift))
+#define _IDBR(i2c)	((i2c)->reg_base + (IDBR << (i2c)->reg_shift))
+#define _ICR(i2c)	((i2c)->reg_base + (ICR << (i2c)->reg_shift))
+#define _ISR(i2c)	((i2c)->reg_base + (ISR << (i2c)->reg_shift))
+#define _ISAR(i2c)	((i2c)->reg_base + (ISAR << (i2c)->reg_shift))
+
+#else
+
+#define IBMR            (0x14)
+#define IDBR            (0x0c)
+#define ICR             (0x00)
+#define ISR             (0x04)
+
+#define _IBMR(i2c)	((i2c)->reg_base + IBMR)
+#define _IDBR(i2c)	((i2c)->reg_base + IDBR)
+#define _ICR(i2c)	((i2c)->reg_base + ICR)
+#define _ISR(i2c)	((i2c)->reg_base + ISR)
+
+struct clk;
+
+#define clk_get(dev, id)	NULL
+#define clk_put(clk)		do { } while (0)
+#define clk_disable(clk)	do { } while (0)
+#define clk_enable(clk)		do { } while (0)
+
+#endif
 
 struct pxa_i2c {
 	spinlock_t		lock;
@@ -122,11 +154,6 @@ struct pxa_i2c {
 	unsigned int		fast_mode :1;
 };
 
-#define _IBMR(i2c)	((i2c)->reg_base + (0x0 << (i2c)->reg_shift))
-#define _IDBR(i2c)	((i2c)->reg_base + (0x4 << (i2c)->reg_shift))
-#define _ICR(i2c)	((i2c)->reg_base + (0x8 << (i2c)->reg_shift))
-#define _ISR(i2c)	((i2c)->reg_base + (0xc << (i2c)->reg_shift))
-#define _ISAR(i2c)	((i2c)->reg_base + (0x10 << (i2c)->reg_shift))
 
 /*
  * I2C Slave mode address
@@ -419,7 +446,9 @@ static void i2c_pxa_reset(struct pxa_i2c *i2c)
 	writel(I2C_ISR_INIT, _ISR(i2c));
 	writel(readl(_ICR(i2c)) & ~ICR_UR, _ICR(i2c));
 
+#ifndef CONFIG_X86
 	writel(i2c->slave_addr, _ISAR(i2c));
+#endif
 
 	/* set control register values */
 	writel(I2C_ICR_INIT | (i2c->fast_mode ? ICR_FM : 0), _ICR(i2c));
@@ -1007,6 +1036,8 @@ static int i2c_pxa_probe(struct platform_device *dev)
 
 	res = platform_get_resource(dev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(dev, 0);
+    dev_dbg(&dev->dev, "i2c pxa irq =0x%x\n",irq);
+    
 	if (res == NULL || irq < 0)
 		return -ENODEV;
 
@@ -1073,7 +1104,7 @@ static int i2c_pxa_probe(struct platform_device *dev)
 		i2c->adap.algo = &i2c_pxa_pio_algorithm;
 	} else {
 		i2c->adap.algo = &i2c_pxa_algorithm;
-		ret = request_irq(irq, i2c_pxa_handler, IRQF_DISABLED,
+		ret = request_irq(irq, i2c_pxa_handler, IRQF_DISABLED | IRQF_SHARED,
 				  i2c->adap.name, i2c);
 		if (ret)
 			goto ereqirq;
@@ -1178,6 +1209,18 @@ static struct platform_driver i2c_pxa_driver = {
 	},
 	.id_table	= i2c_pxa_id_table,
 };
+
+
+void  I2c_power_on_reset(struct i2c_adapter * adapter)
+{
+	struct pxa_i2c *i2c = NULL;
+
+	i2c = adapter->algo_data;
+	i2c_pxa_reset(i2c);
+}
+
+//yjy for str
+EXPORT_SYMBOL(I2c_power_on_reset);
 
 static int __init i2c_adap_pxa_init(void)
 {

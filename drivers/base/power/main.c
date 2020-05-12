@@ -16,6 +16,12 @@
  * domain dependencies may differ from the ancestral dependencies that the
  * subsystem list maintains.
  */
+/******************************************************************
+
+ Includes Intel Corporation's changes/modifications dated: 10/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+******************************************************************/
 
 #include <linux/device.h>
 #include <linux/kallsyms.h>
@@ -29,6 +35,12 @@
 
 #include "../base.h"
 #include "power.h"
+
+#ifdef CONFIG_ARCH_GEN3
+int suspend_device(struct device *dev, pm_message_t state);
+int resume_device(struct device *dev, pm_message_t state);
+#endif
+
 
 /*
  * The entries in the dpm_list list are in a depth first order, simply
@@ -44,7 +56,6 @@ LIST_HEAD(dpm_list);
 
 static DEFINE_MUTEX(dpm_list_mtx);
 static pm_message_t pm_transition;
-
 /*
  * Set once the preparation of devices for a PM transition has started, reset
  * before starting to resume devices.  Protected by dpm_list_mtx.
@@ -201,7 +212,6 @@ static void dpm_wait(struct device *dev, bool async)
 {
 	if (!dev)
 		return;
-
 	if (async || (pm_async_enabled && dev->power.async_suspend))
 		wait_for_completion(&dev->power.completion);
 }
@@ -565,7 +575,6 @@ static int device_resume(struct device *dev, pm_message_t state, bool async)
 	TRACE_RESUME(error);
 	return error;
 }
-
 static void async_resume(void *data, async_cookie_t cookie)
 {
 	struct device *dev = (struct device *)data;
@@ -576,6 +585,12 @@ static void async_resume(void *data, async_cookie_t cookie)
 		pm_dev_err(dev, pm_transition, " async", error);
 	put_device(dev);
 }
+#ifdef CONFIG_ARCH_GEN3
+int resume_device(struct device *dev, pm_message_t state)
+{
+        return device_resume(dev,state,false);
+}
+#endif
 
 static bool is_async(struct device *dev)
 {
@@ -886,7 +901,6 @@ static int __device_suspend(struct device *dev, pm_message_t state, bool async)
 
 	return error;
 }
-
 static void async_suspend(void *data, async_cookie_t cookie)
 {
 	struct device *dev = (struct device *)data;
@@ -900,7 +914,6 @@ static void async_suspend(void *data, async_cookie_t cookie)
 
 	put_device(dev);
 }
-
 static int device_suspend(struct device *dev)
 {
 	INIT_COMPLETION(dev->power.completion);
@@ -913,7 +926,12 @@ static int device_suspend(struct device *dev)
 
 	return __device_suspend(dev, pm_transition, false);
 }
-
+#if CONFIG_ARCH_GEN3
+int suspend_device(struct device *dev, pm_message_t state)
+{
+       return  __device_suspend(dev, state, false);
+}	
+#endif
 /**
  * dpm_suspend - Execute "suspend" callbacks for all non-sysdev devices.
  * @state: PM transition of the system being carried out.

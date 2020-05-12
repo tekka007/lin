@@ -25,6 +25,10 @@
   Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
 
 *******************************************************************************/
+/*******************************************************************************
+  Includes Intel Corporation's changes/modifications dated: 10/2010.
+  Changed/modified portions - Copyright @ 2010, Intel Corporation. All rights reserved.
+*******************************************************************************/
 
 /* e1000_hw.h
  * Structures, enums, and macros for the MAC
@@ -34,6 +38,7 @@
 #define _E1000_HW_H_
 
 #include "e1000_osdep.h"
+#include "gbe_mac_access.h"
 
 
 /* Forward declarations of structures used by the shared code */
@@ -52,6 +57,7 @@ typedef enum {
 	e1000_82545,
 	e1000_82545_rev_3,
 	e1000_82546,
+    e1000_cegbe,
 	e1000_82546_rev_3,
 	e1000_82541,
 	e1000_82541_rev_2,
@@ -211,6 +217,10 @@ typedef enum {
 typedef enum {
     e1000_phy_m88 = 0,
     e1000_phy_igp,
+    e1000_phy_rtl8211b,
+    e1000_phy_rtl8201n,
+    e1000_phy_rtl8201e,
+    e1000_phy_rtl8211d,
     e1000_phy_undefined = 0xFF
 } e1000_phy_type;
 
@@ -442,6 +452,7 @@ void e1000_io_write(struct e1000_hw *hw, unsigned long port, u32 value);
 #define E1000_DEV_ID_82547EI             0x1019
 #define E1000_DEV_ID_82547EI_MOBILE      0x101A
 #define E1000_DEV_ID_82546GB_QUAD_COPPER_KSP3 0x10B5
+#define E1000_DEV_ID_INTEL_CE_GBE				 0x2E6E
 
 #define NODE_ADDRESS_SIZE 6
 #define ETH_LENGTH_OF_ADDRESS 6
@@ -808,6 +819,16 @@ struct e1000_ffvt_entry {
 #define E1000_CTRL_EXT 0x00018	/* Extended Device Control - RW */
 #define E1000_FLA      0x0001C	/* Flash Access - RW */
 #define E1000_MDIC     0x00020	/* MDI Control - RW */
+
+extern void  __iomem * intel_ce_gbe_mdio_base_virt;	
+#define INTEL_CE_GBE_MDIO_RCOMP_BASE	(intel_ce_gbe_mdio_base_virt) 
+#define E1000_MDIO_STS			(INTEL_CE_GBE_MDIO_RCOMP_BASE + 0 )
+#define E1000_MDIO_CMD			(INTEL_CE_GBE_MDIO_RCOMP_BASE + 4 )
+#define E1000_MDIO_DRV			(INTEL_CE_GBE_MDIO_RCOMP_BASE + 8 )
+#define E1000_MDC_DRV			(INTEL_CE_GBE_MDIO_RCOMP_BASE + 0xC )
+#define E1000_RCOMP_CTL		(INTEL_CE_GBE_MDIO_RCOMP_BASE + 0x20 )
+#define E1000_RCOMP_STS		(INTEL_CE_GBE_MDIO_RCOMP_BASE + 0x24 )
+
 #define E1000_SCTL     0x00024	/* SerDes Control - RW */
 #define E1000_FEXTNVM  0x00028	/* Future Extended NVM register */
 #define E1000_FCAL     0x00028	/* Flow Control Address Low - RW */
@@ -820,6 +841,28 @@ struct e1000_ffvt_entry {
 #define E1000_IMS      0x000D0	/* Interrupt Mask Set - RW */
 #define E1000_IMC      0x000D8	/* Interrupt Mask Clear - WO */
 #define E1000_IAM      0x000E0	/* Interrupt Acknowledge Auto Mask */
+
+#define E1000_CTL_AUX  0x000E0  /* Auxiliary Control Register. This register is Intel Gen3 specific, 
+                                 * RMII/RGMII function is switched by this register - RW */
+/* Following are bits definitions of the Auxiliary Control Register */
+#define E1000_CTL_AUX_END_SEL_SHIFT		10
+#define E1000_CTL_AUX_ENDIANESS_SHIFT	8
+#define E1000_CTL_AUX_RGMII_RMII_SHIFT	0
+
+#define E1000_CTL_AUX_DES_PKT 	(0x0 << E1000_CTL_AUX_END_SEL_SHIFT)/* descriptor and packet transfer use CTL_AUX.ENDIANESS*/
+#define E1000_CTL_AUX_DES 		(0x1 << E1000_CTL_AUX_END_SEL_SHIFT)/* descriptor use CTL_AUX.ENDIANESS, packet use default*/
+#define E1000_CTL_AUX_PKT 		(0x2 << E1000_CTL_AUX_END_SEL_SHIFT)/* descriptor use default, packet use CTL_AUX.ENDIANESS*/
+#define E1000_CTL_AUX_ALL 		(0x3 << E1000_CTL_AUX_END_SEL_SHIFT)/* all use CTL_AUX.ENDIANESS*/
+
+#define E1000_CTL_AUX_RGMII 	(0x0 << E1000_CTL_AUX_RGMII_RMII_SHIFT)	
+#define E1000_CTL_AUX_RMII 		(0x1 << E1000_CTL_AUX_RGMII_RMII_SHIFT)	
+
+#define E1000_CTL_AUX_LWLE_BBE	(0x0 << E1000_CTL_AUX_ENDIANESS_SHIFT)	/* LW little endian, Byte big endian */	
+#define E1000_CTL_AUX_LWLE_BLE 	(0x1 << E1000_CTL_AUX_ENDIANESS_SHIFT)	/* LW little endian, Byte little endian */
+#define E1000_CTL_AUX_LWBE_BBE 	(0x2 << E1000_CTL_AUX_ENDIANESS_SHIFT)	/* LW big endian, Byte big endian */
+#define E1000_CTL_AUX_LWBE_BLE 	(0x3 << E1000_CTL_AUX_ENDIANESS_SHIFT)	/* LW big endian, Byte little endian */
+
+
 #define E1000_RCTL     0x00100	/* RX Control - RW */
 #define E1000_RDTR1    0x02820	/* RX Delay Timer (1) - RW */
 #define E1000_RDBAL1   0x02900	/* RX Descriptor Base Address Low (1) - RW */
@@ -1011,6 +1054,7 @@ struct e1000_ffvt_entry {
  * in more current versions of the 8254x. Despite the difference in location,
  * the registers function in the same manner.
  */
+#define E1000_82542_CTL_AUX  E1000_CTL_AUX
 #define E1000_82542_CTRL     E1000_CTRL
 #define E1000_82542_CTRL_DUP E1000_CTRL_DUP
 #define E1000_82542_STATUS   E1000_STATUS
@@ -1381,6 +1425,7 @@ struct e1000_hw {
 	bool leave_av_bit_off;
 	bool bad_tx_carr_stats_fd;
 	bool has_smbus;
+    bool	 		cegbe_is_link_up;
 };
 
 #define E1000_EEPROM_SWDPIN0   0x0001	/* SWDPIN 0 EEPROM Value */
@@ -1570,6 +1615,12 @@ struct e1000_hw {
 #define E1000_MDIC_READY     0x10000000
 #define E1000_MDIC_INT_EN    0x20000000
 #define E1000_MDIC_ERROR     0x40000000
+
+#define INTEL_CE_GBE_MDIC_OP_WRITE 		0x04000000	
+#define INTEL_CE_GBE_MDIC_OP_READ  		0x00000000
+#define INTEL_CE_GBE_MDIC_GO  		   		0x80000000
+#define INTEL_CE_GBE_MDIC_READ_ERROR    	0x80000000
+
 
 #define E1000_KUMCTRLSTA_MASK           0x0000FFFF
 #define E1000_KUMCTRLSTA_OFFSET         0x001F0000
@@ -2460,6 +2511,7 @@ struct e1000_host_command_info {
 #define PHY_1000T_CTRL   0x09	/* 1000Base-T Control Reg */
 #define PHY_1000T_STATUS 0x0A	/* 1000Base-T Status Reg */
 #define PHY_EXT_STATUS   0x0F	/* Extended Status Reg */
+#define PHY_TEST_REG     0x19 /* Test Register */
 
 #define MAX_PHY_REG_ADDRESS        0x1F	/* 5 bit address bus (0-0x1F) */
 #define MAX_PHY_MULTI_PAGE_REG     0xF	/* Registers equal on all pages */
@@ -2544,6 +2596,7 @@ struct e1000_host_command_info {
 #define MII_CR_SPEED_SELECT_LSB 0x2000	/* bits 6,13: 10=1000, 01=100, 00=10 */
 #define MII_CR_LOOPBACK         0x4000	/* 0 = normal, 1 = loopback */
 #define MII_CR_RESET            0x8000	/* 0 = normal, 1 = PHY reset */
+#define RMII_MODE_SET           0x0200  /* 0 = MII Mode, 1 = RMII Mode */
 
 /* PHY Status Register */
 #define MII_SR_EXTENDED_CAPS     0x0001	/* Extended register capabilities */
@@ -2870,6 +2923,13 @@ struct e1000_host_command_info {
 #define M88E1011_I_REV_4   0x04
 #define M88E1111_I_PHY_ID  0x01410CC0
 #define L1LXT971A_PHY_ID   0x001378E0
+#define RTL8211B_PHY_ID   	0x001CC910
+#define RTL8211B_PHY_REV_ID     0x0010//
+#define RTL8201N_PHY_ID     0x8200
+#define RTL8201E_PHY_ID     0x001CC810
+#define RTL8211D_PHY_ID     0x001CC910//It's the same as RTL8211B
+#define RTL8211D_PHY_REV_ID     0x0100
+
 
 /* Bits...
  * 15-5: page
@@ -3045,5 +3105,9 @@ struct e1000_host_command_info {
 #define AUTONEG_ADVERTISE_SPEED_DEFAULT 0x002F	/* Everything but 1000-Half */
 #define AUTONEG_ADVERTISE_10_100_ALL    0x000F	/* All 10/100 speeds */
 #define AUTONEG_ADVERTISE_10_ALL        0x0003	/* 10Mbps Full & Half speeds */
+
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_C5400_KERNEL)
+#define SAMSUNG_SEC_UPC_NOPHY /* samsung upc platform e1000 phy */
+#endif
 
 #endif /* _E1000_HW_H_ */

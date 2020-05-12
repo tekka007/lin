@@ -21,6 +21,7 @@
 #include <asm/uaccess.h>
 #include <asm/i387.h>
 #include <asm/debugreg.h>
+#include <asm/kdebug.h>
 
 unsigned long idle_halt;
 EXPORT_SYMBOL(idle_halt);

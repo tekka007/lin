@@ -241,12 +241,29 @@ static __init int bdi_class_init(void)
 }
 postcore_initcall(bdi_class_init);
 
+static  unsigned int rt_prio_bdi = 91;
+static int __init set_rt_prio_bdi(char *str)
+{
+        if (!str)
+                return 0;
+        rt_prio_bdi = simple_strtoul(str, &str, 0);
+        return 1;
+}
+__setup("rt_prio_bdi=", set_rt_prio_bdi);
+
 static int __init default_bdi_init(void)
 {
 	int err;
+        struct sched_param param;
+
 
 	sync_supers_tsk = kthread_run(bdi_sync_supers, NULL, "sync_supers");
 	BUG_ON(IS_ERR(sync_supers_tsk));
+
+        if (rt_prio_bdi) {
+            param.sched_priority = rt_prio_bdi;
+            sched_setscheduler(sync_supers_tsk, SCHED_RR, &param);
+        }
 
 	init_timer(&sync_supers_timer);
 	setup_timer(&sync_supers_timer, sync_supers_timer_fn, 0);
@@ -392,6 +409,7 @@ static void sync_supers_timer_fn(unsigned long unused)
 static int bdi_forker_task(void *ptr)
 {
 	struct bdi_writeback *me = ptr;
+	struct sched_param param;
 
 	bdi_task_init(me->bdi, me);
 
@@ -470,6 +488,11 @@ static int bdi_forker_task(void *ptr)
 			spin_unlock_bh(&bdi_lock);
 
 			bdi_flush_io(bdi);
+		}
+
+		if (rt_prio_bdi) {
+                	param.sched_priority = rt_prio_bdi;
+                	sched_setscheduler(wb->task, SCHED_RR, &param);
 		}
 	}
 
@@ -570,6 +593,7 @@ int bdi_register(struct backing_dev_info *bdi, struct device *parent,
 	 */
 	if (bdi_cap_flush_forker(bdi)) {
 		struct bdi_writeback *wb = &bdi->wb;
+		struct sched_param param;
 
 		wb->task = kthread_run(bdi_forker_task, wb, "bdi-%s",
 						dev_name(dev));
@@ -580,6 +604,12 @@ int bdi_register(struct backing_dev_info *bdi, struct device *parent,
 			bdi_remove_from_list(bdi);
 			goto exit;
 		}
+
+		if (rt_prio_bdi) {
+            		param.sched_priority = rt_prio_bdi;
+            		sched_setscheduler(wb->task, SCHED_RR, &param);
+        	}
+
 	}
 
 	bdi_debug_register(bdi, dev_name(dev));
@@ -646,7 +676,6 @@ static void bdi_prune_sb(struct backing_dev_info *bdi)
 void bdi_unregister(struct backing_dev_info *bdi)
 {
 	if (bdi->dev) {
-		bdi_set_min_ratio(bdi, 0);
 		bdi_prune_sb(bdi);
 
 		if (!bdi_cap_flush_forker(bdi))

@@ -60,6 +60,12 @@ struct vm_area_struct;
 #define __GFP_NOTRACK	((__force gfp_t)0)
 #endif
 
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+/* {{{ yuvaraja.mg - for bandwidth */
+#define __GFP_EMALLOC	((__force gfp_t)0x400000u)	/* to get data memory from emalloc */
+/* }}} yuvaraja.mg - for bandwidth */
+#endif
+
 /*
  * This may seem redundant, but it's a way of annotating false positives vs.
  * allocations that simply cannot be supported (e.g. page tables).

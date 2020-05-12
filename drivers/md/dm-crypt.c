@@ -28,6 +28,8 @@
 #define DM_MSG_PREFIX "crypt"
 #define MESG_STR(x) x, sizeof(x)
 
+static unsigned int dm_crypt_rt_prio = 91;
+
 /*
  * context holding the current state of a multi-part conversion
  */
@@ -1183,11 +1185,19 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad_io_queue;
 	}
 
+    if (dm_crypt_rt_prio) {
+        set_workqueue_rt_nice(cc->io_queue, dm_crypt_rt_prio);
+    }
+
 	cc->crypt_queue = create_singlethread_workqueue("kcryptd");
 	if (!cc->crypt_queue) {
 		ti->error = "Couldn't create kcryptd queue";
 		goto bad_crypt_queue;
 	}
+
+    if (dm_crypt_rt_prio) {
+        set_workqueue_rt_nice(cc->crypt_queue, dm_crypt_rt_prio);
+    }
 
 	ti->num_flush_requests = 1;
 	ti->private = cc;
@@ -1432,6 +1442,9 @@ static void __exit dm_crypt_exit(void)
 
 module_init(dm_crypt_init);
 module_exit(dm_crypt_exit);
+
+module_param_named(rt_prio, dm_crypt_rt_prio, uint, 0444);
+MODULE_PARM_DESC(rt_prio, "RT prio for the dm subsystem");
 
 MODULE_AUTHOR("Christophe Saout <christophe@saout.de>");
 MODULE_DESCRIPTION(DM_NAME " target for transparent encryption / decryption");

@@ -5,6 +5,12 @@
  * Copyright (C) 2004 Intel
  * Copyright (C) Tom Long Nguyen (tom.l.nguyen@intel.com)
  */
+/******************************************************************
+
+ Includes Intel Corporation's changes/modifications dated: 11/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+******************************************************************/
 
 #ifndef _PORTDRV_H_
 #define _PORTDRV_H_
@@ -23,6 +29,9 @@
 extern struct bus_type pcie_port_bus_type;
 extern int pcie_port_device_register(struct pci_dev *dev);
 #ifdef CONFIG_PM
+#ifdef CONFIG_ARCH_GEN3
+int pcie_portdrv_restore_config(struct pci_dev *dev);
+#endif
 extern int pcie_port_device_suspend(struct device *dev);
 extern int pcie_port_device_resume(struct device *dev);
 #endif

@@ -4,6 +4,13 @@
  *
  *  Support of BIGMEM added by Gerhard Wichert, Siemens AG, July 1999
  */
+/*###################################################################
+
+#Includes Intel Corporation's changes/modifications dated: 08/2010.
+#Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+###################################################################*/
+
 
 #include <linux/module.h>
 #include <linux/signal.h>
@@ -51,6 +58,20 @@
 #include <asm/cacheflush.h>
 #include <asm/page_types.h>
 #include <asm/init.h>
+
+#ifdef CONFIG_ARCH_GEN3
+#define GBE_CONFIG_RAM_BASE    0x60000
+#define GBE_CONFIG_DATA_LENGTH 0x200
+/* from $(KERNEL)/drivers/net/e1000/gbe_mac_access.h */
+#define ACPI_RAM_BASE    0x10000
+#define ACPI_DATA_LENGTH 0x8000
+#define INTEL_8051_RAM_BASE    0x40000
+#define INTEL_8051_DATA_LENGTH 0x10000
+#define AP_STACK_RAM_BASE 0x100000
+#define AP_STACK_RAM_LENGTH 0x10000
+#define PREBOOT_RAM_BASE    0x800000
+#define PREBOOT_RAM_LENGTH 0x40000
+#endif
 
 unsigned long highstart_pfn, highend_pfn;
 
@@ -810,6 +831,16 @@ void __init setup_bootmem_allocator(void)
 		bootmap = setup_node_bootmem(nodeid, start_pfn, end_pfn,
 						 bootmap);
 	}
+#endif
+
+#ifdef CONFIG_ARCH_GEN3
+#ifdef CONFIG_SMP
+        reserve_bootmem(GBE_CONFIG_RAM_BASE, GBE_CONFIG_DATA_LENGTH,BOOTMEM_DEFAULT); //RAM reverve for Gbe mac 
+        reserve_bootmem(ACPI_RAM_BASE,ACPI_DATA_LENGTH,BOOTMEM_DEFAULT); //RAM reserve for ACPI data
+        reserve_bootmem(INTEL_8051_RAM_BASE,INTEL_8051_DATA_LENGTH,BOOTMEM_DEFAULT);//RAM reserver for 8051 firmware
+		reserve_bootmem(AP_STACK_RAM_BASE,AP_STACK_RAM_LENGTH,BOOTMEM_DEFAULT);//RAM reserver for AP stack when resume
+		reserve_bootmem(PREBOOT_RAM_BASE, PREBOOT_RAM_LENGTH, BOOTMEM_DEFAULT);//RAM reserver for preboot segment
+#endif
 #endif
 
 	after_bootmem = 1;

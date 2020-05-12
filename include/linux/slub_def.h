@@ -166,7 +166,14 @@ static __always_inline int kmalloc_index(size_t size)
 		return 1;
 	if (KMALLOC_MIN_SIZE <= 64 && size > 128 && size <= 192)
 		return 2;
+
+#if 0
+	/* 20111026 jmheo. 
+	 * Here, @size is always larger than 8, even if 'ARCH_KMALLOC_MINALIGN' is defined and
+	 * 'KMALLOC_MIN_SIZE' varies. Comment DEADCODE (Fix Prevent CID 93145)
+	 */
 	if (size <=          8) return 3;
+#endif
 	if (size <=         16) return 4;
 	if (size <=         32) return 5;
 	if (size <=         64) return 6;
@@ -178,7 +185,8 @@ static __always_inline int kmalloc_index(size_t size)
 	if (size <=   4 * 1024) return 12;
 /*
  * The following is only needed to support architectures with a larger page
- * size than 4k.
+ * size than 4k. We need to support 2 * PAGE_SIZE here. So for a 64k page
+ * size we would have to go up to 128k.
  */
 	if (size <=   8 * 1024) return 13;
 	if (size <=  16 * 1024) return 14;
@@ -189,7 +197,8 @@ static __always_inline int kmalloc_index(size_t size)
 	if (size <= 512 * 1024) return 19;
 	if (size <= 1024 * 1024) return 20;
 	if (size <=  2 * 1024 * 1024) return 21;
-	return -1;
+	BUG();
+	return -1; /* Will never be reached */
 
 /*
  * What we really wanted to do and cannot do because of compiler issues is:
@@ -210,7 +219,7 @@ static __always_inline struct kmem_cache *kmalloc_slab(size_t size)
 {
 	int index = kmalloc_index(size);
 
-	if (index == 0)
+	if (index <= 0)
 		return NULL;
 
 	return &kmalloc_caches[index];

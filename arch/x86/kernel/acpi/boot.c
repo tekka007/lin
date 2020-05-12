@@ -985,7 +985,6 @@ void __init mp_override_legacy_irq(u8 bus_irq, u8 polarity, u8 trigger, u32 gsi)
 	mp_irq.dstirq = pin;	/* INTIN# */
 
 	save_mp_irq(&mp_irq);
-
 	isa_irq_to_gsi[bus_irq] = gsi;
 }
 

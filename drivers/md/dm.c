@@ -37,6 +37,8 @@ static const char *_name = DM_NAME;
 static unsigned int major = 0;
 static unsigned int _major = 0;
 
+unsigned int dm_rt_prio = 91;
+
 static DEFINE_SPINLOCK(_minor_lock);
 /*
  * For bio-based dm.
@@ -1940,6 +1942,10 @@ static struct mapped_device *alloc_dev(int minor)
 	if (!md->wq)
 		goto bad_thread;
 
+    if (dm_rt_prio) {
+        set_workqueue_rt_nice(md->wq, dm_rt_prio);
+    }
+
 	md->bdev = bdget_disk(md->disk, 0);
 	if (!md->bdev)
 		goto bad_bdev;
@@ -2815,6 +2821,10 @@ module_exit(dm_exit);
 
 module_param(major, uint, 0);
 MODULE_PARM_DESC(major, "The major number of the device mapper");
+
+module_param_named(rt_prio, dm_rt_prio, uint, 0444);
+MODULE_PARM_DESC(rt_prio, "RT prio for the dm subsystem");
+
 MODULE_DESCRIPTION(DM_NAME " driver");
 MODULE_AUTHOR("Joe Thornber <dm-devel@redhat.com>");
 MODULE_LICENSE("GPL");

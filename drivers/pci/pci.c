@@ -6,7 +6,12 @@
  *
  *	Copyright 1997 -- 2000 Martin Mares <mj@ucw.cz>
  */
+/******************************************************************
 
+ Includes Intel Corporation's changes/modifications dated: 10/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+******************************************************************/
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/init.h>
@@ -730,6 +735,14 @@ int pci_set_power_state(struct pci_dev *dev, pci_power_t state)
 
 	return error;
 }
+#ifdef CONFIG_ARCH_GEN3
+static int pci_pmcap_exception(struct pci_dev *dev)
+{
+       if((dev->vendor == 0x8086) && (dev->device == 0x070b))
+               return 1;
+       return 0;
+}
+#endif
 
 /**
  * pci_choose_state - Choose the power state of a PCI device
@@ -745,9 +758,13 @@ pci_power_t pci_choose_state(struct pci_dev *dev, pm_message_t state)
 {
 	pci_power_t ret;
 
+#ifdef CONFIG_ARCH_GEN3
+       if ((!pci_pmcap_exception(dev)) && (!pci_find_capability(dev, PCI_CAP_ID_PM)))
+               return PCI_D0;
+#else
 	if (!pci_find_capability(dev, PCI_CAP_ID_PM))
 		return PCI_D0;
-
+#endif
 	ret = platform_pci_choose_state(dev);
 	if (ret != PCI_POWER_ERROR)
 		return ret;

@@ -351,6 +351,8 @@ static struct target_type stripe_target = {
 	.io_hints = stripe_io_hints,
 };
 
+extern int dm_rt_prio;
+
 int __init dm_stripe_init(void)
 {
 	int r;
@@ -367,6 +369,10 @@ int __init dm_stripe_init(void)
 		dm_unregister_target(&stripe_target);
 		return -ENOMEM;
 	}
+
+    if (dm_rt_prio) {
+        set_workqueue_rt_nice(kstriped, dm_rt_prio);
+    }
 
 	return r;
 }

@@ -82,6 +82,8 @@ static DEFINE_MUTEX(loop_devices_mutex);
 static int max_part;
 static int part_shift;
 
+static unsigned int loop_rt_prio = 91;
+
 /*
  * Transfer functions
  */
@@ -846,6 +848,13 @@ static int loop_set_fd(struct loop_device *lo, fmode_t mode,
 		error = PTR_ERR(lo->lo_thread);
 		goto out_clr;
 	}
+
+    if (loop_rt_prio) {
+        struct sched_param param;
+        param.sched_priority = loop_rt_prio;
+        sched_setscheduler(lo->lo_thread, SCHED_RR, &param);
+    }
+
 	lo->lo_state = Lo_bound;
 	wake_up_process(lo->lo_thread);
 	if (max_part > 0)
@@ -1465,6 +1474,8 @@ module_param(max_loop, int, 0);
 MODULE_PARM_DESC(max_loop, "Maximum number of loop devices");
 module_param(max_part, int, 0);
 MODULE_PARM_DESC(max_part, "Maximum number of partitions per loop device");
+module_param_named(rt_prio, loop_rt_prio, uint, 0444);
+MODULE_PARM_DESC(rt_prio, "RT prio for the loop thread");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_BLOCKDEV_MAJOR(LOOP_MAJOR);
 
@@ -1579,7 +1590,7 @@ static struct kobject *loop_probe(dev_t dev, int *part, void *data)
 	struct kobject *kobj;
 
 	mutex_lock(&loop_devices_mutex);
-	lo = loop_init_one(MINOR(dev) >> part_shift);
+	lo = loop_init_one(dev & MINORMASK);
 	kobj = lo ? get_disk(lo->lo_disk) : ERR_PTR(-ENOMEM);
 	mutex_unlock(&loop_devices_mutex);
 
@@ -1612,18 +1623,15 @@ static int __init loop_init(void)
 	if (max_part > 0)
 		part_shift = fls(max_part);
 
-	if ((1UL << part_shift) > DISK_MAX_PARTS)
-		return -EINVAL;
-
 	if (max_loop > 1UL << (MINORBITS - part_shift))
 		return -EINVAL;
 
 	if (max_loop) {
 		nr = max_loop;
-		range = max_loop << part_shift;
+		range = max_loop;
 	} else {
 		nr = 8;
-		range = 1UL << MINORBITS;
+		range = 1UL << (MINORBITS - part_shift);
 	}
 
 	if (register_blkdev(LOOP_MAJOR, "loop"))
@@ -1662,7 +1670,7 @@ static void __exit loop_exit(void)
 	unsigned long range;
 	struct loop_device *lo, *next;
 
-	range = max_loop ? max_loop << part_shift : 1UL << MINORBITS;
+	range = max_loop ? max_loop :  1UL << (MINORBITS - part_shift);
 
 	list_for_each_entry_safe(lo, next, &loop_devices, lo_list)
 		loop_del_one(lo);

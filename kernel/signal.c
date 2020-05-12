@@ -9,6 +9,13 @@
  *		Changes to use preallocated sigqueue structures
  *		to allow signals to be sent reliably.
  */
+/******************************************************************
+ 
+ Includes Intel Corporation's changes/modifications dated: 08/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation. 
+
+******************************************************************/
+
 
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -2049,6 +2056,13 @@ EXPORT_SYMBOL(send_sig_info);
 EXPORT_SYMBOL(sigprocmask);
 EXPORT_SYMBOL(block_all_signals);
 EXPORT_SYMBOL(unblock_all_signals);
+/* 
+ * The following code is for Intel Media SOC Gen3 base support.
+*/
+#ifdef CONFIG_ARCH_GEN3
+EXPORT_SYMBOL(kill_pid_info);   /* Export this symbol for graphic driver */
+#endif
+
 
 
 /*

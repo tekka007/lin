@@ -17,6 +17,13 @@
  * 	- auto unlock sectors on resume for auto locking flash on power up
  */
 
+/******************************************************************
+ 
+ Includes Intel Corporation's changes/modifications dated: 11/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation. 
+
+******************************************************************/
+
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -304,7 +311,18 @@ static struct cfi_fixup cfi_fixup_table[] = {
 	{ CFI_MFR_ANY, CFI_ID_ANY, fixup_no_write_suspend, NULL },
 #endif
 #if !FORCE_WORD_WRITE
+#ifdef CONFIG_MTD_SAMSUNG_M28W320HST /* for NOR Read/Write (add by taira 2010.08.30) */
+	/*
+	 * ST M28W320HST use different Device Code :
+	 * But the other is similar so we may use m28w320ct function.
+	 * [jmheo, 2010/08/19]
+	 * However, this must be placed before fixup_use_write_buffers() fixup since
+	 * M28W320HST doesn't support buffer write.
+	 */
+	{ CFI_MFR_ST, 0x880a, /* M28W320HST */ fixup_st_m28w320ct, NULL },
+#else
 	{ CFI_MFR_ANY, CFI_ID_ANY, fixup_use_write_buffers, NULL },
+#endif
 #endif
 	{ CFI_MFR_ST, 0x00ba, /* M28W320CT */ fixup_st_m28w320ct, NULL },
 	{ CFI_MFR_ST, 0x00bb, /* M28W320CB */ fixup_st_m28w320cb, NULL },
@@ -762,6 +780,13 @@ static int chip_ready (struct map_info *map, struct flchip *chip, unsigned long 
 
 	case FL_STATUS:
 		for (;;) {
+#ifdef CONFIG_ARCH_GEN3
+			/* Add issuing READ STATUS command before reading 
+			 * flash status to guarantee the status read is
+			 * correct.
+			 */		
+			map_write(map, CMD(0x70), adr);
+#endif
 			status = map_read(map, adr);
 			if (map_word_andequal(map, status, status_OK, status_OK))
 				break;
@@ -1018,8 +1043,6 @@ static void put_chip(struct map_info *map, struct flchip *chip, unsigned long ad
 	case FL_READY:
 	case FL_STATUS:
 	case FL_JEDEC_QUERY:
-		/* We should really make set_vpp() count, rather than doing this */
-		DISABLE_VPP(map);
 		break;
 	default:
 		printk(KERN_ERR "%s: put_chip() called with oldstate %d!!\n", map->name, chip->oldstate);
@@ -1551,7 +1574,8 @@ static int __xipram do_write_oneword(struct map_info *map, struct flchip *chip,
 	}
 
 	xip_enable(map, chip, adr);
- out:	put_chip(map, chip, adr);
+ out:	DISABLE_VPP(map);
+	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 	return ret;
 }
@@ -1794,7 +1818,8 @@ static int __xipram do_write_buffer(struct map_info *map, struct flchip *chip,
 	}
 
 	xip_enable(map, chip, cmd_adr);
- out:	put_chip(map, chip, cmd_adr);
+ out:	DISABLE_VPP(map);
+	put_chip(map, chip, cmd_adr);
 	mutex_unlock(&chip->mutex);
 	return ret;
 }
@@ -1932,6 +1957,7 @@ static int __xipram do_erase_oneblock(struct map_info *map, struct flchip *chip,
 			ret = -EIO;
 		} else if (chipstatus & 0x20 && retries--) {
 			printk(KERN_DEBUG "block erase failed at 0x%08lx: status 0x%lx. Retrying...\n", adr, chipstatus);
+			DISABLE_VPP(map);
 			put_chip(map, chip, adr);
 			mutex_unlock(&chip->mutex);
 			goto retry;
@@ -1944,7 +1970,8 @@ static int __xipram do_erase_oneblock(struct map_info *map, struct flchip *chip,
 	}
 
 	xip_enable(map, chip, adr);
- out:	put_chip(map, chip, adr);
+ out:	DISABLE_VPP(map);
+	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 	return ret;
 }
@@ -2086,7 +2113,14 @@ static int __xipram do_xxlock_oneblock(struct map_info *map, struct flchip *chip
 	}
 
 	xip_enable(map, chip, adr);
-out:	put_chip(map, chip, adr);
+
+#ifdef CONFIG_ARCH_GEN3
+	// Intel specs require this call. Because I don't know how xip works I simply add this call. It shouldn't harm
+	map_write(map, CMD(0xFF), adr);
+#endif
+
+out:	DISABLE_VPP(map);
+	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 	return ret;
 }

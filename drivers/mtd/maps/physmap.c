@@ -19,6 +19,7 @@
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/concat.h>
+#include <linux/mtd/cfi.h>
 #include <linux/io.h>
 
 #define MAX_RESOURCES		4
@@ -82,6 +83,205 @@ static const char *rom_probe_types[] = {
 static const char *part_probe_types[] = { "cmdlinepart", "RedBoot", NULL };
 #endif
 
+#ifdef CONFIG_MTD_PHYSMAP_COMPAT
+#ifdef CONFIG_MTD_SAMSUNG_M28W320HST /* by Changlae Jo 07/05/2010 */
+/* Code from ST Project. Hmm.. ^^: Refer to arch/sh/board/samsung/common/smtflash.c in ST Kernel*/
+/* modified by jongman heo 2010/08/19 */
+#if defined(CONFIG_SMT_G7400_KERNEL)
+static struct mtd_partition mtd_parts_table[] = {
+	{
+		/* Secure Boot area */
+		.name = "Part0: Secure Boot",
+		.size = 0x00300000,
+		.offset = 0x00000000,
+		.mask_flags = 0, // it can be modified by s/w upgrade
+	},
+	{
+		/* OTP area. 64KB of 8051 firmware */
+		.name = "Part1: 8051 fw",
+		.size = 0x00010000,
+		.offset = 0x00350000,
+		.mask_flags = 0, // it can be modified by s/w upgrade
+	}, 
+	{
+		/* OTP area. 64KB of DTCP Key */
+		.name = "Part2: OTP(DTCP)",
+		.size = 0x00010000, 
+		.offset = 0x00380000, 
+		.mask_flags = 0, // before OTP area is locked, it can be modified
+	}, 
+	{
+		/* OTP area. 64KB of Manufacturer Unique Data	 */
+		.name = "Part3: OTP(UNIQUE)",
+		.size = 0x00010000, 
+		.offset = 0x00390000, 
+		.mask_flags = 0, // before OTP area is locked, it can be modified
+	}, 	
+	{
+		/* SSA_DA2 */
+		.name = "Part4: DA2",
+		.size = 0x00010000, 
+		.offset = 0x003B0000, 
+		.mask_flags = 0, // it can be modified by s/w upgrade
+	}, 	
+	{
+		/* DATA area. 64KB of Intel Application Partition Data */	
+		.name = "Part5: DATA(APP)",
+		.size = 0x00010000, 
+		.offset = 0x003E0000,
+		.mask_flags = 0,
+	},
+	{
+		/* OTP area. 8KB of MAC Address (real data size is 0x200) */		
+		.name = "Part6: OTP(MAC)",
+		.size = 0x00010000, //MTDPART_SIZ_FULL, 
+		.offset = 0x003F0000,
+		.mask_flags = 0,
+	},
+	{
+		/* OTP area. 64KB of Encryption Key */
+		.name = "Part7: OTP(GlobalKey)",
+		.size = 0x00010000,
+		.offset = 0x00370000,
+		.mask_flags = 0, // before OTP area is locked, it can be modified
+        }
+};
+#elif defined(CONFIG_SMT_C5400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+static struct mtd_partition mtd_parts_table[] = {
+        {
+                /* Secure Boot area */
+                .name = "Part0: Secure Boot",
+                .size = 0x00280000,
+                .offset = 0x00000000,
+                .mask_flags = 0, // it can be modified by s/w upgrade
+        },
+        {
+                /* non-OTP area. 64KB of 8051 firmware */
+                .name = "Part1: 8051 fw",
+                .size = 0x00010000,
+                .offset = 0x002A0000,
+                .mask_flags = 0, // it can be modified by s/w upgrade
+        },
+        {
+                /* OTP area. 64KB of Global Key, used by USB image encryption/decryption */
+                .name = "Part2: OTP(GlobalKey)",
+                .size = 0x00010000,
+                .offset = 0x002D0000,
+                .mask_flags = 0, // before OTP area is locked, it can be modified
+        },
+        {
+                /* OTP area. 64KB of DTCP Key */
+                .name = "Part3: OTP(DTCP)",
+                .size = 0x00010000,
+                .offset = 0x002E0000,
+                .mask_flags = 0, // before OTP area is locked, it can be modified
+        },
+        {
+                /* OTP area. 64KB of Manufacturer Unique Data    */
+                .name = "Part4: OTP(UNIQUE)",
+                .size = 0x00010000,
+                .offset = 0x00300000,
+                .mask_flags = 0, // before OTP area is locked, it can be modified
+        },
+        {
+                /* SSA_DA2 */
+                .name = "Part5: DA2",
+                .size = 0x00010000,
+                .offset = 0x00320000,
+                .mask_flags = 0, // it can be modified by s/w upgrade
+        },
+        {
+                /* DATA area. 64KB of Intel Application Partition Data */
+                .name = "Part6: DATA(APP)",
+                .size = 0x00010000,
+                .offset = 0x003C0000,
+                .mask_flags = 0,
+        },
+        {
+                /* OTP area. 64KB of MAC Address (real data size is 0x200) */
+                .name = "Part7: OTP(MAC)",
+                .size = 0x00010000,
+                .offset = 0x003E0000,
+                .mask_flags = 0,
+        }
+};
+
+/* NOR mtd map for 16M NOR flash */
+static struct mtd_partition mtd_parts_table_16M[] = {
+        {
+                /* Secure Boot area */
+                .name = "Part0: Secure Boot",
+                .size = 0x00280000,
+                .offset = 0x00000000,
+                .mask_flags = 0, // it can be modified by s/w upgrade
+        },
+        {
+                /* non-OTP area. 128KB of 8051 firmware */
+                .name = "Part1: 8051 fw",
+                .size = 0x00020000,
+                .offset = 0x002A0000,
+                .mask_flags = 0, // it can be modified by s/w upgrade
+        },
+        {
+                /* OTP area. 128KB of DTCP Key */
+                .name = "Part2: OTP(GlobalKey)",
+                .size = 0x00020000,
+                .offset = 0x002C0000,
+                .mask_flags = 0, // before OTP area is locked, it can be modified
+        },
+        {
+                /* OTP area. 128KB of DTCP Key */
+                .name = "Part3: OTP(DTCP)",
+                .size = 0x00020000,
+                .offset = 0x002E0000,
+                .mask_flags = 0, // before OTP area is locked, it can be modified
+        },
+        {
+                /* OTP area. 128KB of Manufacturer Unique Data   */
+                .name = "Part4: OTP(UNIQUE)",
+                .size = 0x00020000,
+                .offset = 0x00300000,
+                .mask_flags = 0, // before OTP area is locked, it can be modified
+        },
+        {
+                /* SSA_DA2 */
+                .name = "Part5: DA2",
+                .size = 0x00020000,
+                .offset = 0x00320000,
+                .mask_flags = 0, // it can be modified by s/w upgrade
+        },
+        {
+                /* DATA area. 128KB of Intel Application Partition Data */
+                .name = "Part6: DATA(APP)",
+                .size = 0x00020000,
+                .offset = 0x003C0000,
+                .mask_flags = 0,
+        },
+        {
+                /* OTP area. 8KB of MAC Address (real data size is 0x200) */
+                .name = "Part7: OTP(MAC)",
+                .size = 0x00020000,
+                .offset = 0x003E0000,
+                .mask_flags = 0,
+        }
+};
+#else
+ #error "Please select one of UPC models"
+#endif
+
+static struct physmap_flash_data physmap_flash_data = {
+	.width		= CONFIG_MTD_PHYSMAP_BANKWIDTH,
+	/*.set_vpp	= set_vpp, */
+	.nr_parts	= ARRAY_SIZE(mtd_parts_table),
+	.parts		= mtd_parts_table
+};
+#else /* original code */
+static struct physmap_flash_data physmap_flash_data = {
+	.width		= CONFIG_MTD_PHYSMAP_BANKWIDTH,
+};
+#endif
+#endif
+
 static int physmap_flash_probe(struct platform_device *dev)
 {
 	struct physmap_flash_data *physmap_data;
@@ -105,6 +305,14 @@ static int physmap_flash_probe(struct platform_device *dev)
 	platform_set_drvdata(dev, info);
 
 	for (i = 0; i < dev->num_resources; i++) {
+		/*
+		 * 20120319 jmheo
+		 *  Probing is done after this ioremap step, so we don't know the flash type here.
+		 *  To support both 4MB & 16MB NOR flash, 16MB length is assumed for
+		 *  request_mem_region (CONFIG_MTD_PHYSMAP_LEN=0x1000000).
+		 *  This makes aliasing at 4MB NOR flash, but should be fine.
+		 * TODO : remove aliasing later
+		 */
 		printk(KERN_NOTICE "physmap platform flash device: %.8llx at %.8llx\n",
 		       (unsigned long long)(dev->resource[i].end - dev->resource[i].start + 1),
 		       (unsigned long long)dev->resource[i].start);
@@ -179,8 +387,23 @@ static int physmap_flash_probe(struct platform_device *dev)
 
 	if (physmap_data->nr_parts) {
 		printk(KERN_NOTICE "Using physmap partition information\n");
-		add_mtd_partitions(info->cmtd, physmap_data->parts,
+#ifdef CONFIG_SMT_C5400_KERNEL
+		struct cfi_private *cfi = info->map[0].fldrv_priv;
+		printk(KERN_NOTICE "Manufacturer %x ID %x\n", cfi->mfr, cfi->id);
+
+		/* Use different partition table depending on NOR flash type */
+		if ((cfi->mfr == CFI_MFR_ST) && (cfi->id == 0x227E)) {
+			// 16MB M29W128GSH
+			add_mtd_partitions(info->cmtd, mtd_parts_table_16M,
+					   physmap_data->nr_parts);
+		}
+		else
+#endif
+		{
+			// 4MB M28W320HST
+			add_mtd_partitions(info->cmtd, physmap_data->parts,
 				   physmap_data->nr_parts);
+		}
 		return 0;
 	}
 #endif
@@ -218,12 +441,7 @@ static struct platform_driver physmap_flash_driver = {
 	},
 };
 
-
 #ifdef CONFIG_MTD_PHYSMAP_COMPAT
-static struct physmap_flash_data physmap_flash_data = {
-	.width		= CONFIG_MTD_PHYSMAP_BANKWIDTH,
-};
-
 static struct resource physmap_flash_resource = {
 	.start		= CONFIG_MTD_PHYSMAP_START,
 	.end		= CONFIG_MTD_PHYSMAP_START + CONFIG_MTD_PHYSMAP_LEN - 1,

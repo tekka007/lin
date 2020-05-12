@@ -518,6 +518,12 @@ extern struct sk_buff *pskb_copy(struct sk_buff *skb,
 extern int	       pskb_expand_head(struct sk_buff *skb,
 					int nhead, int ntail,
 					gfp_t gfp_mask);
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+extern int	       pskb_expand_head_kmalloc(struct sk_buff *skb,
+					int nhead, int ntail,
+					gfp_t gfp_mask);
+extern int	pskb_move_data_to_emalloc(struct sk_buff *skb);
+#endif
 extern struct sk_buff *skb_realloc_headroom(struct sk_buff *skb,
 					    unsigned int headroom);
 extern struct sk_buff *skb_copy_expand(const struct sk_buff *skb,
@@ -1520,6 +1526,11 @@ static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 }
 
 extern struct sk_buff *dev_alloc_skb(unsigned int length);
+
+/* {{{ yuvaraja.mg - for bandwidth */
+extern struct sk_buff *dev_ealloc_skb(unsigned int length);
+/* }}} yuvaraja.mg - for bandwidth */
+
 
 extern struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
 		unsigned int length, gfp_t gfp_mask);

@@ -50,6 +50,38 @@ int ioremap_change_attr(unsigned long vaddr, unsigned long size,
 	return err;
 }
 
+static int
+pagerange_is_notram_callback(unsigned long initial_pfn, unsigned long total_nr_pages, void *arg)
+{
+	return 1;
+}
+
+static int pagerange_is_notram(resource_size_t start, resource_size_t end)
+{
+        int ret = 0;
+        unsigned long start_pfn = start >> PAGE_SHIFT;
+        unsigned long end_pfn = (end + PAGE_SIZE - 1) >> PAGE_SHIFT;
+
+        /*
+         * For legacy reasons, physical address range in the legacy ISA
+         * region is tracked as non-RAM. This will allow users of
+         * /dev/mem to map portions of legacy ISA region, even when
+         * some of those portions are listed(or not even listed) with
+         * different e820 types(RAM/reserved/..)
+         */
+        if (start_pfn < ISA_END_ADDRESS >> PAGE_SHIFT)
+                start_pfn = ISA_END_ADDRESS >> PAGE_SHIFT;
+
+        if (start_pfn < end_pfn) {
+                ret = walk_system_ram_range(start_pfn, end_pfn - start_pfn,
+                                NULL, pagerange_is_notram_callback);
+        }
+
+        /* ret == 0 means we never found a matching "system RAM" resource */
+
+        return (ret > 0) ? 0 : 1;
+}
+
 /*
  * Remap an arbitrary physical address space into the kernel virtual
  * address space. Needed when the kernel wants to access high addresses
@@ -100,16 +132,18 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	/*
 	 * Don't allow anybody to remap normal RAM that we're using..
 	 */
-	for (pfn = phys_addr >> PAGE_SHIFT;
-				(pfn << PAGE_SHIFT) < (last_addr & PAGE_MASK);
-				pfn++) {
-
-		int is_ram = page_is_ram(pfn);
-
-		if (is_ram && pfn_valid(pfn) && !PageReserved(pfn_to_page(pfn)))
-			return NULL;
-		WARN_ON_ONCE(is_ram);
-	}
+	if (pagerange_is_notram(phys_addr, last_addr) == 0) {
+		/* loop only if a "system RAM" intersect it */
+		for (pfn = phys_addr >> PAGE_SHIFT;
+			(pfn << PAGE_SHIFT) < (last_addr & PAGE_MASK);
+			pfn++) {
+            
+            int is_ram = page_is_ram(pfn);
+            
+            if (is_ram && pfn_valid(pfn) && !PageReserved(pfn_to_page(pfn)))
+                return NULL;
+        }
+    }
 
 	/*
 	 * Mappings have to be page-aligned

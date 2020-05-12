@@ -53,6 +53,9 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 extern const struct in6_addr in6addr_linklocal_allrouters;
 #define IN6ADDR_LINKLOCAL_ALLROUTERS_INIT \
 		{ { { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2 } } }
+extern const struct in6_addr in6addr_upc_indirectnodes;
+#define IN6ADDR_UPC_INDIRECTNODES_INIT	\
+		{ { { 0xff,4,0,0,0,0,0,0,0,0,0,0,0,0,1,0 } } }
 #endif
 
 struct sockaddr_in6 {

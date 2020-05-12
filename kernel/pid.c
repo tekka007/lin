@@ -25,6 +25,12 @@
  *     Many thanks to Oleg Nesterov for comments and help
  *
  */
+/*###################################################################
+
+#Includes Intel Corporation's changes/modifications dated: 08/2010.
+#Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+###################################################################*/
 
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -392,6 +398,9 @@ struct task_struct *find_task_by_vpid(pid_t vnr)
 {
 	return find_task_by_pid_ns(vnr, current->nsproxy->pid_ns);
 }
+#ifdef CONFIG_ARCH_GEN3
+EXPORT_SYMBOL(find_task_by_vpid);
+#endif
 
 struct pid *get_task_pid(struct task_struct *task, enum pid_type type)
 {

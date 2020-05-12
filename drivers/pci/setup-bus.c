@@ -435,19 +435,19 @@ static void pbus_size_io(struct pci_bus *bus, resource_size_t min_size)
 				size1 += r_size;
 		}
 	}
-	if (size < min_size)
-		size = min_size;
+//	if (size < min_size)
+//		size = min_size;
 	old_size = resource_size(b_res);
-	if (old_size == 1)
-		old_size = 0;
+//	if (old_size == 1)
+//		old_size = 0;
 /* To be fixed in 2.5: we should have sort of HAVE_ISA
    flag in the struct pci_bus. */
 #if defined(CONFIG_ISA) || defined(CONFIG_EISA)
 	size = (size & 0xff) + ((size & ~0xffUL) << 2);
 #endif
 	size = ALIGN(size + size1, 4096);
-	if (size < old_size)
-		size = old_size;
+//	if (size < old_size)
+//		size = old_size;
 	if (!size) {
 		if (b_res->start || b_res->end)
 			dev_info(&bus->self->dev, "disabling bridge window "
@@ -637,8 +637,8 @@ void __ref pci_bus_size_bridges(struct pci_bus *bus)
 	case PCI_CLASS_BRIDGE_PCI:
 		pci_bridge_check_ranges(bus);
 		if (bus->self->is_hotplug_bridge) {
-			min_io_size  = pci_hotplug_io_size;
-			min_mem_size = pci_hotplug_mem_size;
+//			min_io_size  = pci_hotplug_io_size;
+//			min_mem_size = pci_hotplug_mem_size;
 		}
 	default:
 		pbus_size_io(bus, min_io_size);

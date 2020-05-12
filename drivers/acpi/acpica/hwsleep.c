@@ -46,6 +46,9 @@
 #include "accommon.h"
 #include "actables.h"
 #include <linux/tboot.h>
+#ifdef CONFIG_ARCH_GEN3
+#include <linux/pci.h>
+#endif
 
 #define _COMPONENT          ACPI_HARDWARE
 ACPI_MODULE_NAME("hwsleep")
@@ -218,6 +221,44 @@ module_param(bfs, uint, 0644);
 MODULE_PARM_DESC(gts, "Enable evaluation of _GTS on suspend.");
 MODULE_PARM_DESC(bfs, "Enable evaluation of _BFS on resume".);
 
+
+
+#ifdef CONFIG_ARCH_GEN3
+static void sch_msg_set_data(struct pci_dev *root, unsigned int data)
+{
+	pci_write_config_dword(root, 0xd4, data);
+}
+
+static void sch_msg_send(struct pci_dev *root, unsigned char port, unsigned char opcode, unsigned char reg)
+{
+	pci_write_config_dword(root, 0xd0, ((unsigned int)opcode << 24) | ((unsigned int)port << 16) | ((unsigned int)reg << 8) | 0xf0);
+}
+
+static void sch_reg_writel(unsigned char port, unsigned char reg, unsigned int val)
+{
+	struct pci_dev *root;
+
+	root = pci_get_bus_and_slot(0,0);
+	sch_msg_set_data(root, val);
+	sch_msg_send(root, port, 0xe0, reg);
+	pci_dev_put(root);
+}		
+
+static void intel_ce_enter_str(void)
+{
+	sch_reg_writel(4, 0x71, 0x81800f00);
+/*	outl(0x0ffc, 0x8060);
+	outl(0, 0x8048);
+	outl(0x201, 0x8044);*/
+	outl(0x0ffc, 0xb060);
+	outl(0, 0xb048);
+	outl(0x201, 0xb044);
+
+}
+#endif
+
+
+
 /*******************************************************************************
  *
  * FUNCTION:    acpi_enter_sleep_state
@@ -343,6 +384,7 @@ acpi_status asmlinkage acpi_enter_sleep_state(u8 sleep_state)
 
 	ACPI_FLUSH_CPU_CACHE();
 
+#ifndef CONFIG_ARCH_GEN3
 	tboot_sleep(sleep_state, pm1a_control, pm1b_control);
 
 	/* Write #2: Write both SLP_TYP + SLP_EN */
@@ -351,6 +393,11 @@ acpi_status asmlinkage acpi_enter_sleep_state(u8 sleep_state)
 	if (ACPI_FAILURE(status)) {
 		return_ACPI_STATUS(status);
 	}
+#else
+	intel_ce_enter_str();
+	mdelay(100);
+
+#endif
 
 	if (sleep_state > ACPI_STATE_S3) {
 		/*

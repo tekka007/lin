@@ -4703,7 +4703,7 @@ static void perf_event_free_filter(struct perf_event *event)
 
 #endif /* CONFIG_EVENT_TRACING */
 
-#ifdef CONFIG_HAVE_HW_BREAKPOINT
+#ifdef CONFIG_HW_BREAKPOINT
 static void bp_perf_event_destroy(struct perf_event *event)
 {
 	release_bp_slot(event);

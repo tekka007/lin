@@ -3,6 +3,12 @@
  *
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
+/*###################################################################
+
+#Includes Intel Corporation's changes/modifications dated: 08/2010.
+#Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+###################################################################*/
 
 #include <linux/module.h>
 #include <linux/mm.h>
@@ -382,13 +388,24 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 			magic2 != LINUX_REBOOT_MAGIC2B &&
 	                magic2 != LINUX_REBOOT_MAGIC2C))
 		return -EINVAL;
+/*
+ * The following code is for Intel Media SOC Gen3 base support.
+*/
 
+/*
+ * Since the power management is not enabled for Intel Media SOC
+ * Gen3, so the pm_power_off is not set, and therefore the command
+ * LINUX_REBOOT_CMD_POWER_OFF will be changed to LINUX_REBOOT_CMD_HALT.
+ * To let the poweroff command proceed, we comment out the following
+ * piece of code. 
+*/
+#ifndef CONFIG_ARCH_GEN3
 	/* Instead of trying to make the power_off code look like
 	 * halt when pm_power_off is not set do it the easy way.
 	 */
 	if ((cmd == LINUX_REBOOT_CMD_POWER_OFF) && !pm_power_off)
 		cmd = LINUX_REBOOT_CMD_HALT;
-
+#endif
 	mutex_lock(&reboot_mutex);
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:

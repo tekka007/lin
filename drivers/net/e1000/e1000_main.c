@@ -25,9 +25,37 @@
   Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
 
 *******************************************************************************/
+/*******************************************************************************
+  Includes Intel Corporation's changes/modifications dated: 08/2010.
+  Changed/modified portions - Copyright @ 2010, Intel Corporation. All rights reserved.
+*******************************************************************************/
 
 #include "e1000.h"
 #include <net/ip6_checksum.h>
+
+#include <asm/io.h>
+
+#if 0 /* code arrangement by taira */
+#define EMALLOC_ON_ERROR 1 /* gu9gu 20111108 */
+#define FIXED_DATA_LOCATION 1 /* gu9gu 20111018 */
+
+#ifdef FIXED_DATA_LOCATION /* gu9gu 20111018 */
+#include <linux/emalloc.h>
+#include <asm/pgtable.h>
+#include <asm/page.h>
+#endif
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+#include <linux/emalloc.h>
+#include <asm/pgtable.h>
+#include <asm/page.h>
+#endif
+#endif
+
+
+static unsigned long intel_ce_gbe_mdio_base_phy;	//Intel Media SOC GbE MDIO physical base address
+void __iomem * intel_ce_gbe_mdio_base_virt;		//Intel Media SOC GbE MDIO virtual base address
+void __iomem * gbe_config_base_virt;				//Intel Media SOC FLASH virtual base address	
 
 char e1000_driver_name[] = "e1000";
 static char e1000_driver_string[] = "Intel(R) PRO/1000 Network Driver";
@@ -79,6 +107,7 @@ static DEFINE_PCI_DEVICE_TABLE(e1000_pci_tbl) = {
 	INTEL_E1000_ETHERNET_DEVICE(0x108A),
 	INTEL_E1000_ETHERNET_DEVICE(0x1099),
 	INTEL_E1000_ETHERNET_DEVICE(0x10B5),
+	INTEL_E1000_ETHERNET_DEVICE(0x2E6E),	
 	/* required last entry */
 	{0,}
 };
@@ -457,6 +486,7 @@ static void e1000_power_down_phy(struct e1000_adapter *adapter)
 		case e1000_82545:
 		case e1000_82545_rev_3:
 		case e1000_82546:
+		case e1000_cegbe:
 		case e1000_82546_rev_3:
 		case e1000_82541:
 		case e1000_82541_rev_2:
@@ -558,6 +588,7 @@ void e1000_reset(struct e1000_adapter *adapter)
 	case e1000_82545:
 	case e1000_82545_rev_3:
 	case e1000_82546:
+	case e1000_cegbe:
 	case e1000_82546_rev_3:
 		pba = E1000_PBA_48K;
 		break;
@@ -817,6 +848,7 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	u16 eeprom_data = 0;
 	u16 eeprom_apme_mask = E1000_EEPROM_APME;
 	int bars, need_ioport;
+	u16 tmp= 0;
 
 	/* do not allocate ioport bars when not needed */
 	need_ioport = e1000_is_need_ioport(pdev);
@@ -905,6 +937,17 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 		goto err_sw_init;
 
 	err = -EIO;
+	
+	if (adapter->hw.mac_type == e1000_cegbe)	{ 
+		intel_ce_gbe_mdio_base_phy 	= pci_resource_start(pdev, BAR_1);
+		intel_ce_gbe_mdio_base_virt = ioremap(intel_ce_gbe_mdio_base_phy, pci_resource_len(pdev, BAR_1));  
+		if(!intel_ce_gbe_mdio_base_virt)
+			goto err_sw_init;
+		gbe_config_base_virt 		= phys_to_virt(GBE_CONFIG_RAM_BASE);  
+		if(!gbe_config_base_virt)
+			goto err_mdio_ioremap;
+
+	}
 
 	if (hw->mac_type >= e1000_82543) {
 		netdev->features = NETIF_F_SG |
@@ -1042,6 +1085,22 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	adapter->wol = adapter->eeprom_wol;
 	device_set_wakeup_enable(&adapter->pdev->dev, adapter->wol);
 
+       /*Auto detect PHY address*/
+       if (hw->mac_type == e1000_cegbe)
+       {
+               for (i = 0; i < 32; i++)
+          {
+               hw->phy_addr = i;
+              e1000_read_phy_reg(hw, PHY_ID2 ,&tmp);
+              if (tmp == 0 || tmp == 0xFF)
+               {
+               if (i == 31) goto err_eeprom;
+                continue;
+            }
+               else break;
+           }
+       }
+
 	/* reset the hardware with the new settings */
 	e1000_reset(adapter);
 
@@ -1076,6 +1135,8 @@ err_eeprom:
 		iounmap(hw->flash_address);
 	kfree(adapter->tx_ring);
 	kfree(adapter->rx_ring);
+err_mdio_ioremap:
+	iounmap(intel_ce_gbe_mdio_base_virt);
 err_sw_init:
 	iounmap(hw->hw_addr);
 err_ioremap:
@@ -1199,6 +1260,13 @@ static int __devinit e1000_sw_init(struct e1000_adapter *adapter)
 		e_err("Unable to allocate memory for queues\n");
 		return -ENOMEM;
 	}
+     /* 
+	 * for Intel CE SoC MAC controller, it is necessary to keep
+	 * track of the last known state of the link to determine if
+	 * the link experienced a change in state when watchdog
+	 * fires
+	 */
+	adapter->hw.cegbe_is_link_up = false;
 
 	/* Explicitly disable IRQ since the NIC can be in any state. */
 	e1000_irq_disable(adapter);
@@ -1270,7 +1338,9 @@ static int e1000_open(struct net_device *netdev)
 	if (err)
 		goto err_setup_rx;
 
+#ifndef SAMSUNG_SEC_UPC_NOPHY
 	e1000_power_up_phy(adapter);
+#endif
 
 	adapter->mng_vlan_id = E1000_MNG_VLAN_NONE;
 	if ((hw->mng_cookie.status &
@@ -1366,6 +1436,7 @@ static bool e1000_check_64k_bound(struct e1000_adapter *adapter, void *start,
 	/* First rev 82545 and 82546 need to not allow any memory
 	 * write location to cross 64k boundary due to errata 23 */
 	if (hw->mac_type == e1000_82545 ||
+		hw->mac_type == e1000_cegbe ||
 	    hw->mac_type == e1000_82546) {
 		return ((begin ^ (end - 1)) >> 16) != 0 ? false : true;
 	}
@@ -1400,8 +1471,33 @@ static int e1000_setup_tx_resources(struct e1000_adapter *adapter,
 	txdr->size = txdr->count * sizeof(struct e1000_tx_desc);
 	txdr->size = ALIGN(txdr->size, 4096);
 
+#if 0 /* code arrangement by taira */
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 	txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size, &txdr->dma,
 					GFP_KERNEL);
+#else
+	txdr->desc = emalloc(txdr->size);
+	/* {{{ yuvaraja.mg - for debugging */
+	if(txdr->desc == NULL)
+	{
+		//printk(KERN_ERR "%s %d> ######## NULL emalloc found !!!\n");
+		vfree(txdr->buffer_info);
+		e_err("e1000_setup_tx_resources 1476> NULL emalloc found !!! \n");
+		return -ENOMEM;
+	}
+	/* }}} yuvaraja.mg - for debugging */
+	txdr->dma = (unsigned int)__e_virt_to_phy(txdr->desc);
+#endif
+#else /* EMALLOC_ON_ERROR */
+	txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size, &txdr->dma,
+					GFP_KERNEL);
+#endif /* EMALLOC_ON_ERROR */
+#else
+	txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size, &txdr->dma,
+			GFP_KERNEL);
+#endif
+
 	if (!txdr->desc) {
 setup_tx_desc_die:
 		vfree(txdr->buffer_info);
@@ -1416,8 +1512,32 @@ setup_tx_desc_die:
 		e_err("txdr align check failed: %u bytes at %p\n",
 		      txdr->size, txdr->desc);
 		/* Try again, without freeing the previous */
+#if 0	/* code arrangement by taira */	
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 		txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size,
 						&txdr->dma, GFP_KERNEL);
+#else
+		txdr->desc = emalloc(txdr->size);
+		/* {{{ yuvaraja.mg - for debugging */
+		if(txdr->desc == NULL)
+		{
+			//printk(KERN_ERR "%s %d> ######## NULL emalloc found !!!\n");
+			e_err("e1000_setup_tx_resources 1510> NULL emalloc found !!! \n");
+			goto setup_tx_desc_die;
+		}
+		/* }}} yuvaraja.mg - for debugging */
+
+		txdr->dma = (unsigned int)__e_virt_to_phy(txdr->desc);
+#endif
+#else /* EMALLOC_ON_ERROR */
+		txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size,
+						&txdr->dma, GFP_KERNEL);
+#endif /* EMALLOC_ON_ERROR */
+#else
+        txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size,
+				&txdr->dma, GFP_KERNEL);
+#endif
 		/* Failed allocation, critical failure */
 		if (!txdr->desc) {
 			dma_free_coherent(&pdev->dev, txdr->size, olddesc,
@@ -1596,8 +1716,32 @@ static int e1000_setup_rx_resources(struct e1000_adapter *adapter,
 	rxdr->size = rxdr->count * desc_len;
 	rxdr->size = ALIGN(rxdr->size, 4096);
 
+#if 0 /* code arrangement by taira */
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 	rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size, &rxdr->dma,
 					GFP_KERNEL);
+#else
+	rxdr->desc = emalloc(rxdr->size);
+	/* {{{ yuvaraja.mg - for debugging */
+	if(rxdr->desc == NULL)
+	{
+		//printk(KERN_ERR "%s %d> ######## NULL emalloc found !!!\n");
+		e_err("e1000_setup_rx_resources 1708> NULL emalloc found !!!\n");
+		return -ENOMEM;
+	}
+	/* }}} yuvaraja.mg - for debugging */
+
+	rxdr->dma = (unsigned int)__e_virt_to_phy(rxdr->desc);
+#endif
+#else /* EMALLOC_ON_ERROR */
+	rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size, &rxdr->dma,
+					GFP_KERNEL);
+#endif /* EMALLOC_ON_ERROR */
+#else
+	rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size, &rxdr->dma,
+			GFP_KERNEL);
+#endif
 
 	if (!rxdr->desc) {
 		e_err("Unable to allocate memory for the Rx descriptor ring\n");
@@ -1613,8 +1757,32 @@ setup_rx_desc_die:
 		e_err("rxdr align check failed: %u bytes at %p\n",
 		      rxdr->size, rxdr->desc);
 		/* Try again, without freeing the previous */
+#if 0 /* code arrangement by taira */		
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 		rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size,
 						&rxdr->dma, GFP_KERNEL);
+#else
+		rxdr->desc = emalloc(rxdr->size);
+		/* {{{ yuvaraja.mg - for debugging */
+		if(rxdr->desc == NULL)
+		{
+			//printk(KERN_ERR "%s %d> ######## NULL emalloc found !!!\n");
+			e_err("e1000_setup_rx_resources 1743> NULL emalloc found !!!\n");
+			goto setup_rx_desc_die;
+		}
+		/* }}} yuvaraja.mg - for debugging */
+
+		rxdr->dma = (unsigned int)__e_virt_to_phy(rxdr->desc);
+#endif
+#else /* EMALLOC_ON_ERROR */
+		rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size,
+						&rxdr->dma, GFP_KERNEL);
+#endif /* EMALLOC_ON_ERROR */
+#else
+		rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size,
+				&rxdr->dma, GFP_KERNEL);
+#endif
 		/* Failed allocation, critical failure */
 		if (!rxdr->desc) {
 			dma_free_coherent(&pdev->dev, rxdr->size, olddesc,
@@ -1839,10 +2007,45 @@ static void e1000_unmap_and_free_tx_resource(struct e1000_adapter *adapter,
 		if (buffer_info->mapped_as_page)
 			dma_unmap_page(&adapter->pdev->dev, buffer_info->dma,
 				       buffer_info->length, DMA_TO_DEVICE);
+#if 0 /* code arrangement */
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 		else
 			dma_unmap_single(&adapter->pdev->dev, buffer_info->dma,
-					 buffer_info->length,
-					 DMA_TO_DEVICE);
+					buffer_info->length,
+					DMA_TO_DEVICE);
+#endif /* gu9gu 20111025 moved from 2 lines below */
+#else /* EMALLOC_ON_ERROR */
+		else
+			if(!is_emalloc_p(buffer_info->dma))
+				dma_unmap_single(&adapter->pdev->dev, buffer_info->dma,
+						buffer_info->length,
+						DMA_TO_DEVICE);
+#endif /* EMALLOC_ON_ERROR */
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+		else
+		{
+			if(is_Refresh_VGW())
+			{
+				dma_unmap_single(&adapter->pdev->dev, buffer_info->dma,
+						buffer_info->length,
+						DMA_TO_DEVICE);
+			}
+			else if(!is_emalloc_p(buffer_info->dma))
+			{
+				dma_unmap_single(&adapter->pdev->dev, buffer_info->dma,
+						buffer_info->length,
+						DMA_TO_DEVICE);
+			}
+		}
+#else
+		else
+			dma_unmap_single(&adapter->pdev->dev, buffer_info->dma,
+					buffer_info->length,
+					DMA_TO_DEVICE);
+#endif
+#endif
 		buffer_info->dma = 0;
 	}
 	if (buffer_info->skb) {
@@ -1961,9 +2164,40 @@ static void e1000_clean_rx_ring(struct e1000_adapter *adapter,
 		buffer_info = &rx_ring->buffer_info[i];
 		if (buffer_info->dma &&
 		    adapter->clean_rx == e1000_clean_rx_irq) {
+#if 0 /* code arrangement by taira */
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 			dma_unmap_single(&pdev->dev, buffer_info->dma,
 			                 buffer_info->length,
 					 DMA_FROM_DEVICE);
+#endif
+#else /* EMALLOC_ON_ERROR */
+			if(!is_emalloc_p(buffer_info->dma))
+				dma_unmap_single(&pdev->dev, buffer_info->dma,
+			                 buffer_info->length,
+					 DMA_FROM_DEVICE);
+#endif /* EMALLOC_ON_ERROR */
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+			if(is_Refresh_VGW())
+			{
+				dma_unmap_single(&pdev->dev, buffer_info->dma,
+						buffer_info->length,
+						DMA_FROM_DEVICE);
+
+			}
+			else if(!is_emalloc_p(buffer_info->dma))
+			{
+				dma_unmap_single(&pdev->dev, buffer_info->dma,
+						buffer_info->length,
+						DMA_FROM_DEVICE);
+			}
+#else
+			dma_unmap_single(&pdev->dev, buffer_info->dma,
+					buffer_info->length,
+					DMA_FROM_DEVICE);
+#endif
+#endif
 		} else if (buffer_info->dma &&
 		           adapter->clean_rx == e1000_clean_jumbo_rx_irq) {
 			dma_unmap_page(&pdev->dev, buffer_info->dma,
@@ -2276,7 +2510,7 @@ bool e1000_has_link(struct e1000_adapter *adapter)
 		link_active = hw->serdes_has_link;
 		break;
 	default:
-		break;
+			break;
 	}
 
 	return link_active;
@@ -2293,10 +2527,42 @@ static void e1000_watchdog(unsigned long data)
 	struct net_device *netdev = adapter->netdev;
 	struct e1000_tx_ring *txdr = adapter->tx_ring;
 	u32 link, tctl;
+	u16 link_up;
+	s32 ret_val;
+
+   /* 
+    * Test the PHY for link status on Intel CE SoC MAC.
+    * If the link status is different than the last link status stored
+    * in the adapter->hw structure, then set hw->get_link_status = 1
+    */
+	if (adapter->hw.mac_type == e1000_cegbe) {
+		ret_val = e1000_read_phy_reg(&adapter->hw, PHY_STATUS, &link_up);
+		ret_val = e1000_read_phy_reg(&adapter->hw, PHY_STATUS, &link_up);
+    	if (ret_val)
+			pr_info("Link status detection from PHY failed!\n");
+
+		link_up &= MII_SR_LINK_STATUS;
+       if(link_up != adapter->hw.cegbe_is_link_up)
+			adapter->hw.get_link_status = true;
+		else
+			adapter->hw.get_link_status = false;
+	}
+
 
 	link = e1000_has_link(adapter);
 	if ((netif_carrier_ok(netdev)) && link)
 		goto link_up;
+        if (hw->mac_type == e1000_cegbe) {
+                        ret_val = e1000_read_phy_reg(&adapter->hw, PHY_STATUS, &link_up);
+                        ret_val = e1000_read_phy_reg(&adapter->hw, PHY_STATUS, &link_up);
+                if (ret_val)
+                                pr_info("Link status detection from PHY failed!\n");
+
+             link = link_up & MII_SR_LINK_STATUS;
+	}
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+	link = MII_SR_LINK_STATUS;
+#endif
 
 	if (link) {
 		if (!netif_carrier_ok(netdev)) {
@@ -2734,11 +3000,56 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 		/* set time_stamp *before* dma to help avoid a possible race */
 		buffer_info->time_stamp = jiffies;
 		buffer_info->mapped_as_page = false;
+#if 0 /* code arragement by taira */
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 		buffer_info->dma = dma_map_single(&pdev->dev,
 						  skb->data + offset,
 						  size,	DMA_TO_DEVICE);
 		if (dma_mapping_error(&pdev->dev, buffer_info->dma))
 			goto dma_error;
+#else
+		buffer_info->dma = (unsigned int)__e_virt_to_phy(skb->data);
+#endif
+#else /* EMALLOC_ON_ERROR */
+		if(is_emalloc_v(skb->data))
+		{
+			buffer_info->dma = (unsigned int)__e_virt_to_phy(skb->data);
+/* {{{ yuvaraja.mg - for debugging date="Tuesday, June 04, 2013";time="3:15:10 PM";year="2013";month="6";dayofweek="2";day="4";hour="15";minute="15";second="10";milliseconds="130";  */
+			//printk(KERN_ERR "%s %d> ### Using emalloc DMA - 0x%08X head 0x%08X data 0x%08X!!!\n", __FUNCTION__, __LINE__, buffer_info->dma, skb->head, skb->data);
+/* }}} yuvaraja.mg - for debugging 3:15:10 PM */
+		}
+		else
+		{
+			buffer_info->dma = dma_map_single(&pdev->dev,
+						  skb->data + offset,
+						  size,	DMA_TO_DEVICE);
+			if (dma_mapping_error(&pdev->dev, buffer_info->dma))
+				goto dma_error;
+		}
+#endif /* EMALLOC_ON_ERROR */
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+		if(!is_Refresh_VGW() && is_emalloc_v(skb->data))
+		{
+			buffer_info->dma = (unsigned int)__e_virt_to_phy(skb->data);
+		}
+		else
+		{
+			buffer_info->dma = dma_map_single(&pdev->dev,
+					skb->data + offset,
+					size, DMA_TO_DEVICE);
+			if (dma_mapping_error(&pdev->dev, buffer_info->dma))
+				goto dma_error;
+		}
+#else
+		buffer_info->dma = dma_map_single(&pdev->dev,
+				skb->data + offset,
+				size, DMA_TO_DEVICE);
+		if (dma_mapping_error(&pdev->dev, buffer_info->dma))
+			goto dma_error;
+#endif
+#endif
 		buffer_info->next_to_watch = i;
 
 		len -= size;
@@ -3865,8 +4176,34 @@ static bool e1000_clean_rx_irq(struct e1000_adapter *adapter,
 
 		cleaned = true;
 		cleaned_count++;
+#if 0 /* code arrangement by taira */		
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 		dma_unmap_single(&pdev->dev, buffer_info->dma,
 				 buffer_info->length, DMA_FROM_DEVICE);
+#endif
+#else /* EMALLOC_ON_ERROR */
+		if(!is_emalloc_p(buffer_info->dma))
+			dma_unmap_single(&pdev->dev, buffer_info->dma,
+				 buffer_info->length, DMA_FROM_DEVICE);
+#endif /* EMALLOC_ON_ERROR */
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+		if(is_Refresh_VGW())
+		{
+			dma_unmap_single(&pdev->dev, buffer_info->dma,
+					buffer_info->length, DMA_FROM_DEVICE);
+		}
+		else if(!is_emalloc_p(buffer_info->dma))
+		{
+			dma_unmap_single(&pdev->dev, buffer_info->dma,
+					buffer_info->length, DMA_FROM_DEVICE);
+		}
+#else
+		dma_unmap_single(&pdev->dev, buffer_info->dma,
+				buffer_info->length, DMA_FROM_DEVICE);
+#endif
+#endif
 		buffer_info->dma = 0;
 
 		length = le16_to_cpu(rx_desc->length);
@@ -4127,6 +4464,9 @@ static void e1000_alloc_rx_buffers(struct e1000_adapter *adapter,
 		buffer_info->skb = skb;
 		buffer_info->length = adapter->rx_buffer_len;
 map_skb:
+#if 0 /* code arrangement by taira */
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 		buffer_info->dma = dma_map_single(&pdev->dev,
 						  skb->data,
 						  buffer_info->length,
@@ -4138,6 +4478,66 @@ map_skb:
 			adapter->alloc_rx_buff_failed++;
 			break; /* while !buffer_info->skb */
 		}
+#else
+		buffer_info->dma = (unsigned int)__e_virt_to_phy(skb->data);
+#endif
+#else /* EMALLOC_ON_ERROR */
+		if(is_emalloc_v(skb->data)) {
+			buffer_info->dma = (unsigned int)__e_virt_to_phy(skb->data);
+/* {{{ yuvaraja.mg - for debugging date="Tuesday, June 04, 2013";time="3:15:10 PM";year="2013";month="6";dayofweek="2";day="4";hour="15";minute="15";second="10";milliseconds="130";  */
+			//printk(KERN_ERR "%s %d> ### Using emalloc DMA - 0x%08X head 0x%08X data 0x%08X!!!\n", __FUNCTION__, __LINE__, buffer_info->dma, skb->head, skb->data);
+/* }}} yuvaraja.mg - for debugging 3:15:10 PM */
+		}
+		else
+		{
+			buffer_info->dma = dma_map_single(&pdev->dev,
+						  skb->data,
+						  buffer_info->length,
+						  DMA_FROM_DEVICE);
+			if (dma_mapping_error(&pdev->dev, buffer_info->dma)) {
+				dev_kfree_skb(skb);
+				buffer_info->skb = NULL;
+				buffer_info->dma = 0;
+				adapter->alloc_rx_buff_failed++;
+				break; /* while !buffer_info->skb */
+			}
+
+		}
+#endif /* EMALLOC_ON_ERROR */
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+		if(!is_Refresh_VGW() && is_emalloc_v(skb->data)) {
+			buffer_info->dma = (unsigned int)__e_virt_to_phy(skb->data);
+		}
+		else
+		{
+			buffer_info->dma = dma_map_single(&pdev->dev,
+					skb->data,
+					buffer_info->length,
+					DMA_FROM_DEVICE);
+			if (dma_mapping_error(&pdev->dev, buffer_info->dma)) {
+				dev_kfree_skb(skb);
+				buffer_info->skb = NULL;
+				buffer_info->dma = 0;
+				adapter->alloc_rx_buff_failed++;
+				break; /* while !buffer_info->skb */
+			}
+
+		}
+#else
+		buffer_info->dma = dma_map_single(&pdev->dev,
+				skb->data,
+				buffer_info->length,
+				DMA_FROM_DEVICE);
+		if (dma_mapping_error(&pdev->dev, buffer_info->dma)) {
+			dev_kfree_skb(skb);
+			buffer_info->skb = NULL;
+			buffer_info->dma = 0;
+			adapter->alloc_rx_buff_failed++;
+			break; /* while !buffer_info->skb */
+		}
+#endif
+#endif
 
 		/*
 		 * XXX if it was allocated cleanly it will never map to a
@@ -4154,9 +4554,39 @@ map_skb:
 			dev_kfree_skb(skb);
 			buffer_info->skb = NULL;
 
+#if 0
+#ifndef EMALLOC_ON_ERROR /* gu9gu 20111108 */
+#ifndef FIXED_DATA_LOCATION /* gu9gu 20111018 */
 			dma_unmap_single(&pdev->dev, buffer_info->dma,
 					 adapter->rx_buffer_len,
 					 DMA_FROM_DEVICE);
+#endif
+#else /* EMALLOC_ON_ERROR */
+			if(!is_emalloc_p(buffer_info->dma))
+				dma_unmap_single(&pdev->dev, buffer_info->dma,
+					 adapter->rx_buffer_len,
+					 DMA_FROM_DEVICE);
+#endif /* EMALLOC_ON_ERROR */
+#else
+#if defined(CONFIG_SMT_G7400_KERNEL) || defined(CONFIG_SMT_E6400_KERNEL)
+			if(is_Refresh_VGW())
+			{
+				dma_unmap_single(&pdev->dev, buffer_info->dma,
+						adapter->rx_buffer_len,
+						DMA_FROM_DEVICE);
+			}
+			else if(!is_emalloc_p(buffer_info->dma))
+			{
+				dma_unmap_single(&pdev->dev, buffer_info->dma,
+						adapter->rx_buffer_len,
+						DMA_FROM_DEVICE);
+			}
+#else
+			dma_unmap_single(&pdev->dev, buffer_info->dma,
+					adapter->rx_buffer_len,
+					DMA_FROM_DEVICE);
+#endif
+#endif
 			buffer_info->dma = 0;
 
 			adapter->alloc_rx_buff_failed++;

@@ -186,6 +186,30 @@ module_param(ahci_em_messages, int, 0444);
 MODULE_PARM_DESC(ahci_em_messages,
 	"AHCI Enclosure Management Message control (0 = off, 1 = on)");
 
+
+/**
+ * Workaround for Intel CE4xxx Media Processor SATA controller.  Back-to-back 
+ * MMIO writes to the SATA controller registers can cause a deadlock on the 
+ * bus in rare circumstances.  To prevent back-to-back writes, we insert an 
+ * MMIO read between every write.
+ */
+static inline void ce4xxx_sata_writel(u32 b, volatile void __iomem *addr)
+{
+	static spinlock_t sata_irq_lock = SPIN_LOCK_UNLOCKED;
+	unsigned long flags;
+
+	/* Disable interrupts so the ahci_interrupt can't run between 
+	 * the MMIO write and MMIO read.  This is needed because the 
+	 * ahci_interrupt writes to the SATA controller registers.
+	 */
+	spin_lock_irqsave(&sata_irq_lock, flags);
+
+	writel(b, addr);
+	readl(addr);
+
+	spin_unlock_irqrestore(&sata_irq_lock, flags);
+}
+
 static void ahci_enable_ahci(void __iomem *mmio)
 {
 	int i;
@@ -201,7 +225,7 @@ static void ahci_enable_ahci(void __iomem *mmio)
 	 */
 	for (i = 0; i < 5; i++) {
 		tmp |= HOST_AHCI_EN;
-		writel(tmp, mmio + HOST_CTL);
+		ce4xxx_sata_writel(tmp, mmio + HOST_CTL);
 		tmp = readl(mmio + HOST_CTL);	/* flush && sanity check */
 		if (tmp & HOST_AHCI_EN)
 			return;
@@ -338,10 +362,10 @@ static ssize_t ahci_store_em_buffer(struct device *dev,
 	for (i = 0; i < size; i += 4) {
 		msg = msg_buf[i] | msg_buf[i + 1] << 8 |
 		      msg_buf[i + 2] << 16 | msg_buf[i + 3] << 24;
-		writel(msg, em_mmio + i);
+		ce4xxx_sata_writel(msg, em_mmio + i);
 	}
 
-	writel(em_ctl | EM_CTL_TM, mmio + HOST_EM_CTL);
+	ce4xxx_sata_writel(em_ctl | EM_CTL_TM, mmio + HOST_EM_CTL);
 
 	spin_unlock_irqrestore(ap->lock, flags);
 
@@ -486,10 +510,10 @@ static void ahci_restore_initial_config(struct ata_host *host)
 	struct ahci_host_priv *hpriv = host->private_data;
 	void __iomem *mmio = hpriv->mmio;
 
-	writel(hpriv->saved_cap, mmio + HOST_CAP);
+	ce4xxx_sata_writel(hpriv->saved_cap, mmio + HOST_CAP);
 	if (hpriv->saved_cap2)
-		writel(hpriv->saved_cap2, mmio + HOST_CAP2);
-	writel(hpriv->saved_port_map, mmio + HOST_PORTS_IMPL);
+		ce4xxx_sata_writel(hpriv->saved_cap2, mmio + HOST_CAP2);
+	ce4xxx_sata_writel(hpriv->saved_port_map, mmio + HOST_PORTS_IMPL);
 	(void) readl(mmio + HOST_PORTS_IMPL);	/* flush */
 }
 
@@ -528,7 +552,7 @@ static int ahci_scr_write(struct ata_link *link, unsigned int sc_reg, u32 val)
 	int offset = ahci_scr_offset(link->ap, sc_reg);
 
 	if (offset) {
-		writel(val, port_mmio + offset);
+		ce4xxx_sata_writel(val, port_mmio + offset);
 		return 0;
 	}
 	return -EINVAL;
@@ -542,7 +566,7 @@ void ahci_start_engine(struct ata_port *ap)
 	/* start DMA */
 	tmp = readl(port_mmio + PORT_CMD);
 	tmp |= PORT_CMD_START;
-	writel(tmp, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_CMD);
 	readl(port_mmio + PORT_CMD); /* flush */
 }
 EXPORT_SYMBOL_GPL(ahci_start_engine);
@@ -560,7 +584,7 @@ int ahci_stop_engine(struct ata_port *ap)
 
 	/* setting HBA to idle */
 	tmp &= ~PORT_CMD_START;
-	writel(tmp, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_CMD);
 
 	/* wait for engine to stop. This could be as long as 500 msec */
 	tmp = ata_wait_register(port_mmio + PORT_CMD,
@@ -581,19 +605,19 @@ static void ahci_start_fis_rx(struct ata_port *ap)
 
 	/* set FIS registers */
 	if (hpriv->cap & HOST_CAP_64)
-		writel((pp->cmd_slot_dma >> 16) >> 16,
+		ce4xxx_sata_writel((pp->cmd_slot_dma >> 16) >> 16,
 		       port_mmio + PORT_LST_ADDR_HI);
-	writel(pp->cmd_slot_dma & 0xffffffff, port_mmio + PORT_LST_ADDR);
+	ce4xxx_sata_writel(pp->cmd_slot_dma & 0xffffffff, port_mmio + PORT_LST_ADDR);
 
 	if (hpriv->cap & HOST_CAP_64)
-		writel((pp->rx_fis_dma >> 16) >> 16,
+		ce4xxx_sata_writel((pp->rx_fis_dma >> 16) >> 16,
 		       port_mmio + PORT_FIS_ADDR_HI);
-	writel(pp->rx_fis_dma & 0xffffffff, port_mmio + PORT_FIS_ADDR);
+	ce4xxx_sata_writel(pp->rx_fis_dma & 0xffffffff, port_mmio + PORT_FIS_ADDR);
 
 	/* enable FIS reception */
 	tmp = readl(port_mmio + PORT_CMD);
 	tmp |= PORT_CMD_FIS_RX;
-	writel(tmp, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_CMD);
 
 	/* flush */
 	readl(port_mmio + PORT_CMD);
@@ -607,7 +631,7 @@ static int ahci_stop_fis_rx(struct ata_port *ap)
 	/* disable FIS reception */
 	tmp = readl(port_mmio + PORT_CMD);
 	tmp &= ~PORT_CMD_FIS_RX;
-	writel(tmp, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_CMD);
 
 	/* wait for completion, spec says 500ms, give it 1000 */
 	tmp = ata_wait_register(port_mmio + PORT_CMD, PORT_CMD_FIS_ON,
@@ -629,11 +653,11 @@ static void ahci_power_up(struct ata_port *ap)
 	/* spin up device */
 	if (hpriv->cap & HOST_CAP_SSS) {
 		cmd |= PORT_CMD_SPIN_UP;
-		writel(cmd, port_mmio + PORT_CMD);
+		ce4xxx_sata_writel(cmd, port_mmio + PORT_CMD);
 	}
 
 	/* wake up link */
-	writel(cmd | PORT_CMD_ICC_ACTIVE, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(cmd | PORT_CMD_ICC_ACTIVE, port_mmio + PORT_CMD);
 }
 
 static void ahci_disable_alpm(struct ata_port *ap)
@@ -655,14 +679,14 @@ static void ahci_disable_alpm(struct ata_port *ap)
 	cmd |= PORT_CMD_ICC_ACTIVE;
 
 	/* write out new cmd value */
-	writel(cmd, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(cmd, port_mmio + PORT_CMD);
 	cmd = readl(port_mmio + PORT_CMD);
 
 	/* wait 10ms to be sure we've come out of any low power state */
 	msleep(10);
 
 	/* clear out any PhyRdy stuff from interrupt status */
-	writel(PORT_IRQ_PHYRDY, port_mmio + PORT_IRQ_STAT);
+	ce4xxx_sata_writel(PORT_IRQ_PHYRDY, port_mmio + PORT_IRQ_STAT);
 
 	/* go ahead and clean out PhyRdy Change from Serror too */
 	ahci_scr_write(&ap->link, SCR_ERROR, ((1 << 16) | (1 << 18)));
@@ -677,7 +701,7 @@ static void ahci_disable_alpm(struct ata_port *ap)
 	 * Enable interrupts on Phy Ready.
 	 */
 	pp->intr_mask |= PORT_IRQ_PHYRDY;
-	writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	ce4xxx_sata_writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
 
 	/*
 	 * don't change the link pm policy - we can be called
@@ -728,7 +752,7 @@ static int ahci_enable_alpm(struct ata_port *ap,
 	 * that even supported?
 	 */
 	pp->intr_mask &= ~PORT_IRQ_PHYRDY;
-	writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	ce4xxx_sata_writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
 
 	/*
 	 * Set a flag to indicate that we should ignore all PhyRdy
@@ -753,7 +777,7 @@ static int ahci_enable_alpm(struct ata_port *ap,
 	cmd |= PORT_CMD_ALPE;
 
 	/* write out new cmd value */
-	writel(cmd, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(cmd, port_mmio + PORT_CMD);
 	cmd = readl(port_mmio + PORT_CMD);
 
 	/* IPM bits should be set by libata-core */
@@ -773,12 +797,12 @@ static void ahci_power_down(struct ata_port *ap)
 	/* put device into listen mode, first set PxSCTL.DET to 0 */
 	scontrol = readl(port_mmio + PORT_SCR_CTL);
 	scontrol &= ~0xf;
-	writel(scontrol, port_mmio + PORT_SCR_CTL);
+	ce4xxx_sata_writel(scontrol, port_mmio + PORT_SCR_CTL);
 
 	/* then set PxCMD.SUD to 0 */
 	cmd = readl(port_mmio + PORT_CMD) & ~PORT_CMD_ICC_MASK;
 	cmd &= ~PORT_CMD_SPIN_UP;
-	writel(cmd, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(cmd, port_mmio + PORT_CMD);
 }
 #endif
 
@@ -856,7 +880,7 @@ int ahci_reset_controller(struct ata_host *host)
 	if (!ahci_skip_host_reset) {
 		tmp = readl(mmio + HOST_CTL);
 		if ((tmp & HOST_RESET) == 0) {
-			writel(tmp | HOST_RESET, mmio + HOST_CTL);
+			ce4xxx_sata_writel(tmp | HOST_RESET, mmio + HOST_CTL);
 			readl(mmio + HOST_CTL); /* flush */
 		}
 
@@ -973,7 +997,7 @@ int ahci_reset_em(struct ata_host *host)
 	if ((em_ctl & EM_CTL_TM) || (em_ctl & EM_CTL_RST))
 		return -EINVAL;
 
-	writel(em_ctl | EM_CTL_RST, mmio + HOST_EM_CTL);
+	ce4xxx_sata_writel(em_ctl | EM_CTL_RST, mmio + HOST_EM_CTL);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ahci_reset_em);
@@ -1020,13 +1044,13 @@ static ssize_t ahci_transmit_led_message(struct ata_port *ap, u32 state,
 		message[1] = ((state & ~EM_MSG_LED_HBA_PORT) | ap->port_no);
 
 		/* write message to EM_LOC */
-		writel(message[0], mmio + hpriv->em_loc);
-		writel(message[1], mmio + hpriv->em_loc+4);
+		ce4xxx_sata_writel(message[0], mmio + hpriv->em_loc);
+		ce4xxx_sata_writel(message[1], mmio + hpriv->em_loc+4);
 
 		/*
 		 * tell hardware to transmit the message
 		 */
-		writel(em_ctl | EM_CTL_TM, mmio + HOST_EM_CTL);
+		ce4xxx_sata_writel(em_ctl | EM_CTL_TM, mmio + HOST_EM_CTL);
 	}
 
 	/* save off new led state for port/slot */
@@ -1137,15 +1161,15 @@ static void ahci_port_init(struct device *dev, struct ata_port *ap,
 	/* clear SError */
 	tmp = readl(port_mmio + PORT_SCR_ERR);
 	VPRINTK("PORT_SCR_ERR 0x%x\n", tmp);
-	writel(tmp, port_mmio + PORT_SCR_ERR);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_SCR_ERR);
 
 	/* clear port IRQ */
 	tmp = readl(port_mmio + PORT_IRQ_STAT);
 	VPRINTK("PORT_IRQ_STAT 0x%x\n", tmp);
 	if (tmp)
-		writel(tmp, port_mmio + PORT_IRQ_STAT);
+		ce4xxx_sata_writel(tmp, port_mmio + PORT_IRQ_STAT);
 
-	writel(1 << port_no, mmio + HOST_IRQ_STAT);
+	ce4xxx_sata_writel(1 << port_no, mmio + HOST_IRQ_STAT);
 }
 
 void ahci_init_controller(struct ata_host *host)
@@ -1168,7 +1192,7 @@ void ahci_init_controller(struct ata_host *host)
 
 	tmp = readl(mmio + HOST_CTL);
 	VPRINTK("HOST_CTL 0x%x\n", tmp);
-	writel(tmp | HOST_IRQ_EN, mmio + HOST_CTL);
+	ce4xxx_sata_writel(tmp | HOST_IRQ_EN, mmio + HOST_CTL);
 	tmp = readl(mmio + HOST_CTL);
 	VPRINTK("HOST_CTL 0x%x\n", tmp);
 }
@@ -1243,7 +1267,7 @@ int ahci_kick_engine(struct ata_port *ap)
 	/* perform CLO */
 	tmp = readl(port_mmio + PORT_CMD);
 	tmp |= PORT_CMD_CLO;
-	writel(tmp, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_CMD);
 
 	rc = 0;
 	tmp = ata_wait_register(port_mmio + PORT_CMD,
@@ -1273,7 +1297,7 @@ static int ahci_exec_polled_cmd(struct ata_port *ap, int pmp,
 	ahci_fill_cmd_slot(pp, 0, cmd_fis_len | flags | (pmp << 12));
 
 	/* issue & wait */
-	writel(1, port_mmio + PORT_CMD_ISSUE);
+	ce4xxx_sata_writel(1, port_mmio + PORT_CMD_ISSUE);
 
 	if (timeout_msec) {
 		tmp = ata_wait_register(port_mmio + PORT_CMD_ISSUE, 0x1, 0x1,
@@ -1423,7 +1447,7 @@ static void ahci_postreset(struct ata_link *link, unsigned int *class)
 	else
 		new_tmp &= ~PORT_CMD_ATAPI;
 	if (new_tmp != tmp) {
-		writel(new_tmp, port_mmio + PORT_CMD);
+		ce4xxx_sata_writel(new_tmp, port_mmio + PORT_CMD);
 		readl(port_mmio + PORT_CMD); /* flush */
 	}
 }
@@ -1513,7 +1537,7 @@ static void ahci_fbs_dec_intr(struct ata_port *ap)
 	/* time to wait for DEC is not specified by AHCI spec,
 	 * add a retry loop for safety.
 	 */
-	writel(fbs | PORT_FBS_DEC, port_mmio + PORT_FBS);
+	ce4xxx_sata_writel(fbs | PORT_FBS_DEC, port_mmio + PORT_FBS);
 	fbs = readl(port_mmio + PORT_FBS);
 	while ((fbs & PORT_FBS_DEC) && retries--) {
 		udelay(1);
@@ -1648,7 +1672,7 @@ static void ahci_port_intr(struct ata_port *ap)
 	int rc;
 
 	status = readl(port_mmio + PORT_IRQ_STAT);
-	writel(status, port_mmio + PORT_IRQ_STAT);
+	ce4xxx_sata_writel(status, port_mmio + PORT_IRQ_STAT);
 
 	/* ignore BAD_PMP while resetting */
 	if (unlikely(resetting))
@@ -1781,7 +1805,7 @@ irqreturn_t ahci_interrupt(int irq, void *dev_instance)
 	 * Also, use the unmasked value to clear interrupt as spurious
 	 * pending event on a dummy port might cause screaming IRQ.
 	 */
-	writel(irq_stat, mmio + HOST_IRQ_STAT);
+	ce4xxx_sata_writel(irq_stat, mmio + HOST_IRQ_STAT);
 
 	spin_unlock(&host->lock);
 
@@ -1804,17 +1828,17 @@ static unsigned int ahci_qc_issue(struct ata_queued_cmd *qc)
 	pp->active_link = qc->dev->link;
 
 	if (qc->tf.protocol == ATA_PROT_NCQ)
-		writel(1 << qc->tag, port_mmio + PORT_SCR_ACT);
+		ce4xxx_sata_writel(1 << qc->tag, port_mmio + PORT_SCR_ACT);
 
 	if (pp->fbs_enabled && pp->fbs_last_dev != qc->dev->link->pmp) {
 		u32 fbs = readl(port_mmio + PORT_FBS);
 		fbs &= ~(PORT_FBS_DEV_MASK | PORT_FBS_DEC);
 		fbs |= qc->dev->link->pmp << PORT_FBS_DEV_OFFSET;
-		writel(fbs, port_mmio + PORT_FBS);
+		ce4xxx_sata_writel(fbs, port_mmio + PORT_FBS);
 		pp->fbs_last_dev = qc->dev->link->pmp;
 	}
 
-	writel(1 << qc->tag, port_mmio + PORT_CMD_ISSUE);
+	ce4xxx_sata_writel(1 << qc->tag, port_mmio + PORT_CMD_ISSUE);
 
 	ahci_sw_activity(qc->dev->link);
 
@@ -1850,7 +1874,7 @@ static void ahci_freeze(struct ata_port *ap)
 	void __iomem *port_mmio = ahci_port_base(ap);
 
 	/* turn IRQ off */
-	writel(0, port_mmio + PORT_IRQ_MASK);
+	ce4xxx_sata_writel(0, port_mmio + PORT_IRQ_MASK);
 }
 
 static void ahci_thaw(struct ata_port *ap)
@@ -1863,11 +1887,11 @@ static void ahci_thaw(struct ata_port *ap)
 
 	/* clear IRQ */
 	tmp = readl(port_mmio + PORT_IRQ_STAT);
-	writel(tmp, port_mmio + PORT_IRQ_STAT);
-	writel(1 << ap->port_no, mmio + HOST_IRQ_STAT);
+	ce4xxx_sata_writel(tmp, port_mmio + PORT_IRQ_STAT);
+	ce4xxx_sata_writel(1 << ap->port_no, mmio + HOST_IRQ_STAT);
 
 	/* turn IRQ back on */
-	writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+	ce4xxx_sata_writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
 }
 
 static void ahci_error_handler(struct ata_port *ap)
@@ -1914,7 +1938,7 @@ static void ahci_enable_fbs(struct ata_port *ap)
 	if (rc)
 		return;
 
-	writel(fbs | PORT_FBS_EN, port_mmio + PORT_FBS);
+	ce4xxx_sata_writel(fbs | PORT_FBS_EN, port_mmio + PORT_FBS);
 	fbs = readl(port_mmio + PORT_FBS);
 	if (fbs & PORT_FBS_EN) {
 		dev_printk(KERN_INFO, ap->host->dev, "FBS is enabled.\n");
@@ -1946,7 +1970,7 @@ static void ahci_disable_fbs(struct ata_port *ap)
 	if (rc)
 		return;
 
-	writel(fbs & ~PORT_FBS_EN, port_mmio + PORT_FBS);
+	ce4xxx_sata_writel(fbs & ~PORT_FBS_EN, port_mmio + PORT_FBS);
 	fbs = readl(port_mmio + PORT_FBS);
 	if (fbs & PORT_FBS_EN)
 		dev_printk(KERN_ERR, ap->host->dev, "Failed to disable FBS\n");
@@ -1966,12 +1990,22 @@ static void ahci_pmp_attach(struct ata_port *ap)
 
 	cmd = readl(port_mmio + PORT_CMD);
 	cmd |= PORT_CMD_PMP;
-	writel(cmd, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(cmd, port_mmio + PORT_CMD);
 
 	ahci_enable_fbs(ap);
 
 	pp->intr_mask |= PORT_IRQ_BAD_PMP;
-	writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+
+	/*
+	 * We must not change the port interrupt mask register if the
+	 * port is marked frozen, the value in pp->intr_mask will be
+	 * restored later when the port is thawed.
+	 *
+	 * Note that during initialization, the port is marked as
+	 * frozen since the irq handler is not yet registered.
+	 */
+	if (!(ap->pflags & ATA_PFLAG_FROZEN))
+		ce4xxx_sata_writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
 }
 
 static void ahci_pmp_detach(struct ata_port *ap)
@@ -1984,10 +2018,13 @@ static void ahci_pmp_detach(struct ata_port *ap)
 
 	cmd = readl(port_mmio + PORT_CMD);
 	cmd &= ~PORT_CMD_PMP;
-	writel(cmd, port_mmio + PORT_CMD);
+	ce4xxx_sata_writel(cmd, port_mmio + PORT_CMD);
 
 	pp->intr_mask &= ~PORT_IRQ_BAD_PMP;
-	writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
+
+	/* see comment above in ahci_pmp_attach() */
+	if (!(ap->pflags & ATA_PFLAG_FROZEN))
+		ce4xxx_sata_writel(pp->intr_mask, port_mmio + PORT_IRQ_MASK);
 }
 
 static int ahci_port_resume(struct ata_port *ap)

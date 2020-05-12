@@ -31,7 +31,7 @@ enum bp_type_idx {
 
 #include <linux/perf_event.h>
 
-#ifdef CONFIG_HAVE_HW_BREAKPOINT
+#ifdef CONFIG_HW_BREAKPOINT
 
 static inline void hw_breakpoint_init(struct perf_event_attr *attr)
 {
@@ -106,7 +106,7 @@ static inline struct arch_hw_breakpoint *counter_arch_bp(struct perf_event *bp)
 	return &bp->hw.info;
 }
 
-#else /* !CONFIG_HAVE_HW_BREAKPOINT */
+#else /* !CONFIG_HW_BREAKPOINT */
 
 static inline struct perf_event *
 register_user_hw_breakpoint(struct perf_event_attr *attr,
@@ -140,7 +140,7 @@ static inline struct arch_hw_breakpoint *counter_arch_bp(struct perf_event *bp)
 	return NULL;
 }
 
-#endif /* CONFIG_HAVE_HW_BREAKPOINT */
+#endif /* CONFIG_HW_BREAKPOINT */
 #endif /* __KERNEL__ */
 
 #endif /* _LINUX_HW_BREAKPOINT_H */

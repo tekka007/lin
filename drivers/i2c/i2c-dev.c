@@ -208,12 +208,12 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 	struct i2c_msg *rdwr_pa;
 	u8 __user **data_ptrs;
 	int i, res;
-
+	 
 	if (copy_from_user(&rdwr_arg,
 			   (struct i2c_rdwr_ioctl_data __user *)arg,
 			   sizeof(rdwr_arg)))
 		return -EFAULT;
-
+	 
 	/* Put an arbitrary limit on the number of messages that can
 	 * be sent at once */
 	if (rdwr_arg.nmsgs > I2C_RDRW_IOCTL_MAX_MSGS)
@@ -427,6 +427,15 @@ static long i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		 */
 		client->adapter->timeout = msecs_to_jiffies(arg * 10);
 		break;
+
+	case I2C_RESET:
+		{
+			extern void  I2c_power_on_reset(struct i2c_adapter * adapter);
+				
+			I2c_power_on_reset(client->adapter);
+		}	
+		break;
+		
 	default:
 		/* NOTE:  returning a fault code here could cause trouble
 		 * in buggy userspace code.  Some old kernel bugs returned

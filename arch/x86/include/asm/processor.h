@@ -810,6 +810,16 @@ extern unsigned int		BIOS_revision;
 extern int			bootloader_type;
 extern int			bootloader_version;
 
+/*
+ * Refresh VGW implies that GVL E0 is used
+ * bootloader_type and bootloader_version values are passed from CEFDK.
+ * Previous CEFDKs pass zero-s, so this function is safe to use on other models.
+ */
+static inline bool is_Refresh_VGW(void)
+{
+	return (bootloader_type == 0x151 && bootloader_version == 1);
+}
+
 extern char			ignore_fpu_irq;
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT 1

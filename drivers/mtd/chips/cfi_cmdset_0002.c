@@ -730,8 +730,6 @@ static void put_chip(struct map_info *map, struct flchip *chip, unsigned long ad
 
 	case FL_READY:
 	case FL_STATUS:
-		/* We should really make set_vpp() count, rather than doing this */
-		DISABLE_VPP(map);
 		break;
 	default:
 		printk(KERN_ERR "MTD: put_chip() called with oldstate %d!!\n", chip->oldstate);
@@ -1201,6 +1199,7 @@ static int __xipram do_write_oneword(struct map_info *map, struct flchip *chip, 
 	xip_enable(map, chip, adr);
  op_done:
 	chip->state = FL_READY;
+	DISABLE_VPP(map);
 	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 
@@ -1458,6 +1457,7 @@ static int __xipram do_write_buffer(struct map_info *map, struct flchip *chip,
 	ret = -EIO;
  op_done:
 	chip->state = FL_READY;
+	DISABLE_VPP(map);
 	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 
@@ -1631,6 +1631,7 @@ static int __xipram do_erase_chip(struct map_info *map, struct flchip *chip)
 
 	chip->state = FL_READY;
 	xip_enable(map, chip, adr);
+	DISABLE_VPP(map);
 	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 
@@ -1721,6 +1722,7 @@ static int __xipram do_erase_oneblock(struct map_info *map, struct flchip *chip,
 	}
 
 	chip->state = FL_READY;
+	DISABLE_VPP(map);
 	put_chip(map, chip, adr);
 	mutex_unlock(&chip->mutex);
 	return ret;

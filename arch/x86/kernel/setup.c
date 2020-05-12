@@ -239,6 +239,11 @@ unsigned long saved_video_mode;
 static char __initdata command_line[COMMAND_LINE_SIZE];
 #ifdef CONFIG_CMDLINE_BOOL
 static char __initdata builtin_cmdline[COMMAND_LINE_SIZE] = CONFIG_CMDLINE;
+#ifdef CONFIG_CMDLINE_EXT
+static char __initdata builtin_cmdline_ext[COMMAND_LINE_SIZE] = CONFIG_CMDLINE_EXT;
+#else
+static char __initdata builtin_cmdline_ext[COMMAND_LINE_SIZE];
+#endif
 #endif
 
 #if defined(CONFIG_EDD) || defined(CONFIG_EDD_MODULE)
@@ -805,9 +810,20 @@ void __init setup_arch(char **cmdline_p)
 
 #ifdef CONFIG_CMDLINE_BOOL
 #ifdef CONFIG_CMDLINE_OVERRIDE
-	strlcpy(boot_command_line, builtin_cmdline, COMMAND_LINE_SIZE);
+	if (is_Refresh_VGW()) {
+		strlcpy(boot_command_line, builtin_cmdline_ext, COMMAND_LINE_SIZE);
+	}
+	else {
+		strlcpy(boot_command_line, builtin_cmdline, COMMAND_LINE_SIZE);
+	}
 #else
-	if (builtin_cmdline[0]) {
+	if (is_Refresh_VGW() && builtin_cmdline_ext[0]) {
+		/* append boot loader cmdline to builtin */
+		strlcat(builtin_cmdline_ext, " ", COMMAND_LINE_SIZE);
+		strlcat(builtin_cmdline_ext, boot_command_line, COMMAND_LINE_SIZE);
+		strlcpy(boot_command_line, builtin_cmdline_ext, COMMAND_LINE_SIZE);
+	}
+	else if (builtin_cmdline[0]) {
 		/* append boot loader cmdline to builtin */
 		strlcat(builtin_cmdline, " ", COMMAND_LINE_SIZE);
 		strlcat(builtin_cmdline, boot_command_line, COMMAND_LINE_SIZE);

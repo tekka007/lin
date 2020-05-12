@@ -1,3 +1,9 @@
+/******************************************************************
+ 
+ Includes Intel Corporation's changes/modifications dated: 08/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation. 
+
+******************************************************************/
 #include <linux/module.h>
 #include <linux/reboot.h>
 #include <linux/init.h>
@@ -477,22 +483,6 @@ static struct dmi_system_id __initdata pci_reboot_dmi_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "iMac9,1"),
 		},
 	},
-	{	/* Handle problems with rebooting on the Latitude E5420. */
-		.callback = set_pci_reboot,
-		.ident = "Dell Latitude E5420",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude E5420"),
-		},
-	},
-	{	/* Handle problems with rebooting on the Latitude E6420. */
-		.callback = set_pci_reboot,
-		.ident = "Dell Latitude E6420",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude E6420"),
-		},
-	},
 	{ }
 };
 
@@ -579,9 +569,19 @@ static void native_machine_emergency_restart(void)
 			mach_reboot_fixups(); /* for board specific fixups */
 
 			for (i = 0; i < 10; i++) {
+/*
+ * The following code is for Intel Media SOC Gen3 base support.
+*/
+			#ifdef CONFIG_ARCH_GEN3
+/*
+ * Intel Media SOC Gen3 uses this specific method to reboot.
+*/
+				outb(0x2, 0xcf9);
+			#else	
 				kb_wait();
 				udelay(50);
 				outb(0xfe, 0x64); /* pulse reset low */
+			#endif
 				udelay(50);
 			}
 
@@ -703,6 +703,19 @@ static void native_machine_halt(void)
 
 static void native_machine_power_off(void)
 {
+/*
+ * The following code is for Intel Media SOC Gen3 base support.
+*/
+#ifdef CONFIG_ARCH_GEN3
+/*
+ * Intel Media SOC Gen3 uses this specific way to power off.
+*/
+	machine_shutdown();
+	while(1) {
+		outb(0x4, 0xcf9);
+		udelay(50);
+	}
+#else
 	if (pm_power_off) {
 		if (!reboot_force)
 			machine_shutdown();
@@ -710,6 +723,7 @@ static void native_machine_power_off(void)
 	}
 	/* a fallback in case there is no PM info available */
 	tboot_shutdown(TB_SHUTDOWN_HALT);
+#endif
 }
 
 struct machine_ops machine_ops = {

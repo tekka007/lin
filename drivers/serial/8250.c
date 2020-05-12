@@ -17,6 +17,12 @@
  *  mapbase is the physical address of the IO port.
  *  membase is an 'ioremapped' cookie.
  */
+/******************************************************************
+
+ Includes Intel Corporation's changes/modifications dated: 08/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+******************************************************************/
 
 #if defined(CONFIG_SERIAL_8250_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
@@ -274,7 +280,17 @@ static const struct serial8250_config uart_config[] = {
 		.flags		= UART_CAP_FIFO | UART_NATSEMI,
 	},
 	[PORT_XSCALE] = {
+/*
+ * The following code is for Intel Media SOC Gen3 base support.
+*/
+#ifdef CONFIG_GEN3_UART
+/*
+ * Since we have legal issue to use "Xscale", so change it to "GEN3_serial".
+*/
+		.name		= "GEN3_serial",
+#else
 		.name		= "XScale",
+#endif		
 		.fifo_size	= 32,
 		.tx_loadsz	= 32,
 		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_10,
@@ -1537,7 +1553,118 @@ static void serial8250_handle_port(struct uart_8250_port *up)
 
 	spin_unlock_irqrestore(&up->port.lock, flags);
 }
+/*
+ * The following code is for Intel Media SOC Gen3 B0 and B1 workaround.
+*/
+#ifdef CONFIG_GEN3_UART
+/*
+ * The UART Tx interrupts are not set under some conditions and therefore serial
+ * transmission hangs. This is a silicon issue and has not been root caused. The
+ * workaround for this silicon issue checks UART_LSR_THRE bit and UART_LSR_TEMT 
+ * bit of LSR register in interrupt handler to see whether at least one of these
+ * two bits is set, if so then process the transmit request. If this workaround
+ * is not applied, then the serial transmission may hang. This workaround is for
+ * errata number 9 in Errata - B step. 
+*/
 
+/*
+ * This is the serial driver's interrupt routine.
+ *
+ * Arjan thinks the old way was overly complex, so it got simplified.
+ * Alan disagrees, saying that need the complexity to handle the weird
+ * nature of ISA shared interrupts.  (This is a special exception.)
+ *
+ * In order to handle ISA shared interrupts properly, we need to check
+ * that all ports have been serviced, and therefore the ISA interrupt
+ * line has been de-asserted.
+ *
+ * This means we need to loop through all ports. checking that they
+ * don't have an interrupt pending.
+ */
+static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
+{
+	struct irq_info *i = dev_id;
+	struct list_head *l, *end = NULL;
+	int pass_counter = 0, handled = 0;
+	unsigned int my_flags, ier, lsr;
+
+	DEBUG_INTR("serial8250_interrupt(%d)...", irq);
+
+	spin_lock(&i->lock);
+
+	l = i->head;
+	do {
+		struct uart_8250_port *up;
+		unsigned int iir;
+		my_flags = 0x00;
+
+		up = list_entry(l, struct uart_8250_port, list);
+
+		iir = serial_in(up, UART_IIR);
+		if (!(iir & UART_IIR_NO_INT)) {
+			serial8250_handle_port(up);
+			my_flags |= 0x01;
+
+			handled = 1;
+
+			end = NULL;
+		} else if (up->port.iotype == UPIO_DWAPB &&
+			  (iir & UART_IIR_BUSY) == UART_IIR_BUSY) {
+			/* The DesignWare APB UART has an Busy Detect (0x07)
+			 * interrupt meaning an LCR write attempt occured while the
+			 * UART was busy. The interrupt must be cleared by reading
+			 * the UART status register (USR) and the LCR re-written. */
+			unsigned int status;
+			status = *(volatile u32 *)up->port.private_data;
+			serial_out(up, UART_LCR, up->lcr);
+
+			handled = 1;
+
+			end = NULL;
+		}
+		ier = serial_in(up, UART_IER);
+		/* see if the UART's XMIT interrupt is enabled */
+		if(ier & UART_IER_THRI) {
+			lsr = serial_in(up, UART_LSR);
+			/* now check to see if the UART should be
+			   generating an interrupt (but isn't) */
+			if(lsr & (UART_LSR_THRE | UART_LSR_TEMT)) {
+				/* handle as though we really got the IRQ */
+				spin_lock(&up->port.lock);
+				transmit_chars(up);	/* XMIT only */
+				spin_unlock(&up->port.lock);
+
+				my_flags |= 0x02;  /* handle the old else */
+
+				handled = 1;
+
+				end = NULL;
+			}
+		}
+		/* this was the else in the old code */
+		if(0x00 == my_flags) {
+			if (end == NULL)
+				end = l;
+		}
+
+		l = l->next;
+
+		if (l == i->head && pass_counter++ > PASS_LIMIT) {
+			/* If we hit this, we're dead. */
+			printk(KERN_ERR "serial8250: too much work for "
+				"irq%d\n", irq);
+			break;
+		}
+	} while (l != end);
+
+	spin_unlock(&i->lock);
+
+	DEBUG_INTR("end.\n");
+
+	return IRQ_RETVAL(handled);
+}
+
+#else
 /*
  * This is the serial driver's interrupt routine.
  *
@@ -1608,7 +1735,7 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 
 	return IRQ_RETVAL(handled);
 }
-
+#endif
 /*
  * To support ISA shared interrupts, we need to have one interrupt
  * handler that ensures that the IRQ line has been deasserted
@@ -2781,11 +2908,20 @@ serial8250_console_write(struct console *co, const char *s, unsigned int count)
 	 */
 	ier = serial_in(up, UART_IER);
 
-	if (up->capabilities & UART_CAP_UUE)
+	/* 
+	 * The following code is for Intel Media SOC Gen3 base support.
+	*/
+#ifdef CONFIG_GEN3_UART
+	/*
+	 * Should enable UUE (Uart Unit Enable) bit.
+	*/
 		serial_out(up, UART_IER, UART_IER_UUE);
-	else
-		serial_out(up, UART_IER, 0);
-
+#else
+		if (up->capabilities & UART_CAP_UUE)
+			serial_out(up, UART_IER, UART_IER_UUE);
+		else
+			serial_out(up, UART_IER, 0);
+#endif
 	uart_console_write(&up->port, s, count, serial8250_console_putchar);
 
 	/*

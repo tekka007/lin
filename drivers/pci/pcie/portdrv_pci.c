@@ -5,6 +5,12 @@
  * Copyright (C) 2004 Intel
  * Copyright (C) Tom Long Nguyen (tom.l.nguyen@intel.com)
  */
+/******************************************************************
+
+ Includes Intel Corporation's changes/modifications dated: 11/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+******************************************************************/
 
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -30,8 +36,11 @@ MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
 /* global data */
-
+#ifdef CONFIG_ARCH_GEN3
+int pcie_portdrv_restore_config(struct pci_dev *dev)
+#else
 static int pcie_portdrv_restore_config(struct pci_dev *dev)
+#endif
 {
 	int retval;
 

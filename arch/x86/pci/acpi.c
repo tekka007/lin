@@ -6,6 +6,12 @@
 #include <linux/slab.h>
 #include <asm/numa.h>
 #include <asm/pci_x86.h>
+/******************************************************************
+
+ Includes Intel Corporation's changes/modifications dated: 08/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+******************************************************************/
 
 struct pci_root_info {
 	struct acpi_device *bridge;
@@ -15,8 +21,16 @@ struct pci_root_info {
 	struct pci_bus *bus;
 	int busnum;
 };
-
+	/*
+	 * The following code is for Intel Media SOC SMP support. Since kernel can not get a correct ACPI data from CEFDK, 
+	 * thus by default we force to ignore host bridge windows from ACPI
+	 */
+#if defined(CONFIG_ARCH_GEN3) & defined(CONFIG_SMP)
+static bool pci_use_crs = false;
+#else
 static bool pci_use_crs = true;
+#endif
+
 
 static int __init set_use_crs(const struct dmi_system_id *id)
 {

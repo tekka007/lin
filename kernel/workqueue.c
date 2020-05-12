@@ -271,6 +271,32 @@ static void __queue_work(struct cpu_workqueue_struct *cwq,
 	spin_unlock_irqrestore(&cwq->lock, flags);
 }
 
+void set_workqueue_nice(struct workqueue_struct *wq, long nice)
+{
+    struct task_struct *p;
+    int cpu;
+    for_each_cpu(cpu, wq_cpu_map(wq)) {
+        struct cpu_workqueue_struct *cwq = per_cpu_ptr(wq->cpu_wq, cpu);
+        p = cwq->thread;
+        set_user_nice(p, nice);
+    }
+}
+EXPORT_SYMBOL_GPL(set_workqueue_nice);
+
+void set_workqueue_rt_nice(struct workqueue_struct *wq, long nice)
+{
+	int cpu;
+	struct task_struct *p;
+	struct sched_param param = { .sched_priority = nice };
+
+    for_each_cpu(cpu, wq_cpu_map(wq)) {
+        struct cpu_workqueue_struct *cwq = per_cpu_ptr(wq->cpu_wq, cpu);
+        p = cwq->thread;
+        sched_setscheduler_nocheck(p, SCHED_RR, &param);
+    }
+}
+EXPORT_SYMBOL_GPL(set_workqueue_rt_nice);
+
 /**
  * queue_work - queue work on a workqueue
  * @wq: workqueue to use

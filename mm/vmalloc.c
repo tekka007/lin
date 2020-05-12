@@ -7,6 +7,12 @@
  *  Major rework to support vmap/vunmap, Christoph Hellwig, SGI, August 2002
  *  Numa awareness, Christoph Lameter, SGI, June 2005
  */
+/******************************************************************
+ 
+ Includes Intel Corporation's changes/modifications dated: 08/2010.
+ Changed/modified portions - Copyright(c) 2010, Intel Corporation. 
+
+******************************************************************/
 
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
@@ -512,6 +518,10 @@ static atomic_t vmap_lazy_nr = ATOMIC_INIT(0);
 /* for per-CPU blocks */
 static void purge_fragmented_blocks_allcpus(void);
 
+#ifdef CONFIG_ARCH_GEN3
+static DEFINE_SPINLOCK(purge_lock);
+#endif
+
 /*
  * called before a call to iounmap() if the caller wants vm_area_struct's
  * immediately freed.
@@ -534,7 +544,9 @@ void set_iounmap_nonlazy(void)
 static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 					int sync, int force_flush)
 {
+#ifndef CONFIG_ARCH_GEN3
 	static DEFINE_SPINLOCK(purge_lock);
+#endif
 	LIST_HEAD(valist);
 	struct vmap_area *va;
 	struct vmap_area *n_va;
@@ -612,8 +624,14 @@ static void purge_vmap_area_lazy(void)
  */
 static void free_unmap_vmap_area_noflush(struct vmap_area *va)
 {
+#ifdef CONFIG_ARCH_GEN3
+        spin_lock(&purge_lock);  /* Make execution of following two lines code atomic */
+#endif
 	va->flags |= VM_LAZY_FREE;
 	atomic_add((va->va_end - va->va_start) >> PAGE_SHIFT, &vmap_lazy_nr);
+#ifdef CONFIG_ARCH_GEN3
+        spin_unlock(&purge_lock);
+#endif
 	if (unlikely(atomic_read(&vmap_lazy_nr) > lazy_max_pages()))
 		try_purge_vmap_area_lazy();
 }

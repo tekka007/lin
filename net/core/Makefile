@@ -18,4 +18,9 @@ obj-$(CONFIG_NET_DMA) += user_dma.o
 obj-$(CONFIG_FIB_RULES) += fib_rules.o
 obj-$(CONFIG_TRACEPOINTS) += net-traces.o
 obj-$(CONFIG_NET_DROP_MONITOR) += drop_monitor.o
+#
+# gu9gu 20111018
+ifneq ($(CONFIG_SMT_C5400_KERNEL),y)
+obj-y += emalloc.o
+endif
 

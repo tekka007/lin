@@ -225,6 +225,9 @@ extern void flush_workqueue(struct workqueue_struct *wq);
 extern void flush_scheduled_work(void);
 extern void flush_delayed_work(struct delayed_work *work);
 
+extern void set_workqueue_nice(struct workqueue_struct *wq, long nice);
+extern void set_workqueue_rt_nice(struct workqueue_struct *wq, long nice);
+
 extern int schedule_work(struct work_struct *work);
 extern int schedule_work_on(int cpu, struct work_struct *work);
 extern int schedule_delayed_work(struct delayed_work *work, unsigned long delay);

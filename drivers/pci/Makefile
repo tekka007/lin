@@ -1,3 +1,9 @@
+###################################################################
+
+#Includes Intel Corporation's changes/modifications dated: 02/2010.
+#Changed/modified portions - Copyright(c) 2010, Intel Corporation.
+
+###################################################################
 #
 # Makefile for the PCI bus specific drivers.
 #
@@ -5,6 +11,7 @@
 obj-y		+= access.o bus.o probe.o remove.o pci.o \
 			pci-driver.o search.o pci-sysfs.o rom.o setup-res.o \
 			irq.o vpd.o
+obj-y          += pci-intelce_pm.o
 obj-$(CONFIG_PROC_FS) += proc.o
 obj-$(CONFIG_SYSFS) += slot.o
 

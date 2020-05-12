@@ -25,12 +25,22 @@
   Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
 
  */
+/*******************************************************************************
+  Includes Intel Corporation's changes/modifications dated: 10/2010.
+  Changed/modified portions - Copyright @ 2010, Intel Corporation. All rights reserved.
+*******************************************************************************/
 
 /* e1000_hw.c
  * Shared functions for accessing and configuring the MAC
  */
 
 #include "e1000.h"
+#include <asm/processor.h>
+
+int (* gbe_config_media_read)(void  __iomem * config_ram_base_t, int length);
+int (* gbe_config_media_write)(void  __iomem * config_ram_base_t, int length);
+EXPORT_SYMBOL(gbe_config_media_read);
+EXPORT_SYMBOL(gbe_config_media_write);
 
 static s32 e1000_check_downshift(struct e1000_hw *hw);
 static s32 e1000_check_polarity(struct e1000_hw *hw,
@@ -126,6 +136,17 @@ static s32 e1000_set_phy_type(struct e1000_hw *hw)
 	case M88E1111_I_PHY_ID:
 		hw->phy_type = e1000_phy_m88;
 		break;
+    case RTL8211B_PHY_ID:
+        hw->phy_type = e1000_phy_rtl8211b;
+	if (hw->phy_revision == RTL8211D_PHY_REV_ID)
+	        hw->phy_type = e1000_phy_rtl8211d;
+        break;
+    case RTL8201N_PHY_ID:
+        hw->phy_type = e1000_phy_rtl8201n;
+        break;
+    case RTL8201E_PHY_ID:
+        hw->phy_type = e1000_phy_rtl8201e;
+        break;
 	case IGP01E1000_I_PHY_ID:
 		if (hw->mac_type == e1000_82541 ||
 		    hw->mac_type == e1000_82541_rev_2 ||
@@ -318,6 +339,9 @@ s32 e1000_set_mac_type(struct e1000_hw *hw)
 	case E1000_DEV_ID_82547GI:
 		hw->mac_type = e1000_82547_rev_2;
 		break;
+	case E1000_DEV_ID_INTEL_CE_GBE:
+		hw->mac_type = e1000_cegbe;
+		break;
 	default:
 		/* Should never have loaded on this device */
 		return -E1000_ERR_MAC_TYPE;
@@ -372,6 +396,9 @@ void e1000_set_media_type(struct e1000_hw *hw)
 		case e1000_82542_rev2_1:
 			hw->media_type = e1000_media_type_fiber;
 			break;
+        case e1000_cegbe:
+            hw->media_type = e1000_media_type_copper;
+            break;
 		default:
 			status = er32(STATUS);
 			if (status & E1000_STATUS_TBIMODE) {
@@ -460,6 +487,7 @@ s32 e1000_reset_hw(struct e1000_hw *hw)
 		/* Reset is performed on a shadow of the control register */
 		ew32(CTRL_DUP, (ctrl | E1000_CTRL_RST));
 		break;
+	case e1000_cegbe:
 	default:
 		ew32(CTRL, (ctrl | E1000_CTRL_RST));
 		break;
@@ -1260,6 +1288,111 @@ static s32 e1000_copper_link_mgp_setup(struct e1000_hw *hw)
 
 	return E1000_SUCCESS;
 }
+/********************************************************************
+* Copper link setup for e1000_phy_rtl series.
+*
+* hw - Struct containing variables accessed by shared code
+*********************************************************************/
+static int32_t
+e1000_copper_link_rtl_setup(struct e1000_hw *hw)
+ 
+{
+    int32_t ret_val;
+	
+    /* SW Reset the PHY so all changes take effect */
+    ret_val = e1000_phy_reset(hw);
+    if(ret_val) {
+        e_dbg("Error Resetting the PHY\n");
+        return ret_val;
+    }
+
+   return E1000_SUCCESS;
+
+}
+
+static int32_t
+gbe_oem_phy_setup(struct e1000_hw *hw)
+{
+	int32_t ret_val;
+    u32 ctrl_aux;
+    u16 phy_data;
+
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+    return E1000_SUCCESS;
+#endif
+
+	switch(hw->phy_type)
+	{
+		case e1000_phy_rtl8211b:
+	        ret_val = e1000_copper_link_rtl_setup(hw);
+            if(ret_val)	{
+               printk(" e1000_copper_link_rtl_setup failed!\n");
+               return ret_val;
+            }
+            break;
+		case e1000_phy_rtl8211d:
+	        ret_val = e1000_copper_link_rtl_setup(hw);
+            if(ret_val)	{
+               printk(" e1000_copper_link_rtl_setup failed!\n");
+               return ret_val;
+            }
+            break;
+        case e1000_phy_rtl8201n:
+            //Set RMII mode 
+            ctrl_aux = er32(CTL_AUX);
+            ctrl_aux |= E1000_CTL_AUX_RMII;
+            ew32(CTL_AUX, ctrl_aux);
+            E1000_WRITE_FLUSH();
+            //Disable the J/K bits requried for recieve
+            ctrl_aux = er32(CTL_AUX);
+            ctrl_aux |= 0x4;
+            ctrl_aux &= ~0x2;
+            ew32(CTL_AUX, ctrl_aux);
+            E1000_WRITE_FLUSH();
+            ret_val = e1000_copper_link_rtl_setup(hw);
+            if(ret_val)	{
+				printk(" e1000_copper_link_rtl_setup failed!\n");
+	            return ret_val;
+			}
+			break;
+        case e1000_phy_rtl8201e:
+            //Set RMII mode
+            ctrl_aux = er32(CTL_AUX);
+            ctrl_aux |= E1000_CTL_AUX_RMII;
+            ew32(CTL_AUX, ctrl_aux);
+            E1000_WRITE_FLUSH();
+            //Disable the J/K bits requried for recieve
+            ctrl_aux = er32(CTL_AUX);
+            ctrl_aux |= 0x4;
+            ctrl_aux &= ~0x2;
+            ew32(CTL_AUX, ctrl_aux);
+            E1000_WRITE_FLUSH();
+            ret_val = e1000_copper_link_rtl_setup(hw);
+            if(ret_val)
+            {
+                printk(" e1000_copper_link_rtl_setup failed!\n");
+                return ret_val;
+            }
+            //RMII mode setting in 8201E PHY chip
+            ret_val = e1000_read_phy_reg(hw, PHY_TEST_REG, &phy_data);
+            if (ret_val)
+              return ret_val;
+
+            phy_data |= RMII_MODE_SET;
+            ret_val = e1000_write_phy_reg(hw, PHY_TEST_REG, phy_data);
+            if (ret_val)
+            {
+                printk(" 8201E RMII mode setup failed!\n");
+                return ret_val;
+            }
+	        break;
+		default:
+        	e_dbg("Error Resetting the PHY\n");
+			return E1000_ERR_PHY_TYPE;
+	}
+   return E1000_SUCCESS;
+}
+
 
 /**
  * e1000_copper_link_autoneg - setup auto-neg
@@ -1285,6 +1418,10 @@ static s32 e1000_copper_link_autoneg(struct e1000_hw *hw)
 	 */
 	if (hw->autoneg_advertised == 0)
 		hw->autoneg_advertised = AUTONEG_ADVERTISE_SPEED_DEFAULT;
+	
+    /* RTL8201N phy only supports 10/100 */
+    if (hw->phy_type == e1000_phy_rtl8201n)
+        hw->autoneg_advertised &= AUTONEG_ADVERTISE_10_100_ALL;
 
 	e_dbg("Reconfiguring auto-neg advertisement params\n");
 	ret_val = e1000_phy_setup_autoneg(hw);
@@ -1341,7 +1478,7 @@ static s32 e1000_copper_link_postconfig(struct e1000_hw *hw)
 	s32 ret_val;
 	e_dbg("e1000_copper_link_postconfig");
 
-	if (hw->mac_type >= e1000_82544) {
+    if((hw->mac_type >= e1000_82544) && (hw->mac_type != e1000_cegbe)) {
 		e1000_config_collision_dist(hw);
 	} else {
 		ret_val = e1000_config_mac_to_phy(hw);
@@ -1396,6 +1533,15 @@ static s32 e1000_setup_copper_link(struct e1000_hw *hw)
 		if (ret_val)
 			return ret_val;
 	}
+	else {
+        ret_val = gbe_oem_phy_setup(hw);
+        if(ret_val)
+		{
+			printk(" gbe_oem_phy_setup failed!\n");
+            return ret_val;
+		}
+	}
+
 
 	if (hw->autoneg) {
 		/* Setup autoneg and flow control advertisement
@@ -1417,6 +1563,14 @@ static s32 e1000_setup_copper_link(struct e1000_hw *hw)
 	/* Check link status. Wait up to 100 microseconds for link to become
 	 * valid.
 	 */
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+    ret_val = e1000_copper_link_postconfig(hw);
+    if (ret_val) 
+       return ret_val;
+
+    printk(KERN_INFO "Valid link established!!!\n");
+    return E1000_SUCCESS;
+#endif
 	for (i = 0; i < 10; i++) {
 		ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &phy_data);
 		if (ret_val)
@@ -1424,6 +1578,8 @@ static s32 e1000_setup_copper_link(struct e1000_hw *hw)
 		ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &phy_data);
 		if (ret_val)
 			return ret_val;
+		
+		hw->cegbe_is_link_up = (phy_data & MII_SR_LINK_STATUS) != 0;
 
 		if (phy_data & MII_SR_LINK_STATUS) {
 			/* Config the MAC and PHY after link is up */
@@ -1450,8 +1606,8 @@ static s32 e1000_setup_copper_link(struct e1000_hw *hw)
 s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 {
 	s32 ret_val;
-	u16 mii_autoneg_adv_reg;
-	u16 mii_1000t_ctrl_reg;
+	u16 mii_autoneg_adv_reg = 0;
+	u16 mii_1000t_ctrl_reg = 0;
 
 	e_dbg("e1000_phy_setup_autoneg");
 
@@ -1461,11 +1617,15 @@ s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 		return ret_val;
 
 	/* Read the MII 1000Base-T Control Register (Address 9). */
+    if (hw->phy_type == e1000_phy_rtl8201n || hw->phy_type == e1000_phy_rtl8201n) {
+        mii_1000t_ctrl_reg = 0;
+    }
+    else{
 	ret_val =
-	    e1000_read_phy_reg(hw, PHY_1000T_CTRL, &mii_1000t_ctrl_reg);
+	    e1000_write_phy_reg(hw, PHY_1000T_CTRL, mii_1000t_ctrl_reg);
 	if (ret_val)
 		return ret_val;
-
+    	}
 	/* Need to parse both autoneg_advertised and fc and set up
 	 * the appropriate PHY registers.  First we will parse for
 	 * autoneg_advertised software override.  Since we can advertise
@@ -1576,11 +1736,15 @@ s32 e1000_phy_setup_autoneg(struct e1000_hw *hw)
 		return ret_val;
 
 	e_dbg("Auto-Neg Advertising %x\n", mii_autoneg_adv_reg);
-
+	
+    if (hw->phy_type == e1000_phy_rtl8201n || hw->phy_type == e1000_phy_rtl8201e) {
+        mii_1000t_ctrl_reg = 0;
+    }
+    else{
 	ret_val = e1000_write_phy_reg(hw, PHY_1000T_CTRL, mii_1000t_ctrl_reg);
 	if (ret_val)
 		return ret_val;
-
+    	}
 	return E1000_SUCCESS;
 }
 
@@ -1860,7 +2024,7 @@ static s32 e1000_config_mac_to_phy(struct e1000_hw *hw)
 
 	/* 82544 or newer MAC, Auto Speed Detection takes care of
 	 * MAC speed/duplex configuration.*/
-	if (hw->mac_type >= e1000_82544)
+    if ((hw->mac_type >= e1000_82544 ) && (hw->mac_type != e1000_cegbe))
 		return E1000_SUCCESS;
 
 	/* Read the Device Control Register and set the bits to Force Speed
@@ -1869,7 +2033,53 @@ static s32 e1000_config_mac_to_phy(struct e1000_hw *hw)
 	ctrl = er32(CTRL);
 	ctrl |= (E1000_CTRL_FRCSPD | E1000_CTRL_FRCDPX);
 	ctrl &= ~(E1000_CTRL_SPD_SEL | E1000_CTRL_ILOS);
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+	if (is_Refresh_VGW()) {
+		ctrl |= E1000_CTRL_SPD_1000;/*Temporary add for debugging refresh model->Fix for DV board*/
+	}else{
+		ctrl |= E1000_CTRL_SPD_1000;
+	}
+    ctrl |= E1000_CTRL_FD;
+    e1000_config_collision_dist(hw);
 
+    /* Write the configured values back to the Device Control Reg. */
+    ew32(CTRL, ctrl);
+    return E1000_SUCCESS;
+#endif
+
+    switch (hw->phy_type) {
+    case e1000_phy_rtl8201n:
+        ret_val = e1000_read_phy_reg(hw, PHY_CTRL, &phy_data);
+        if (ret_val)
+            return ret_val;
+
+        if (phy_data & 0x0100)
+            ctrl |= E1000_CTRL_FD;
+        else
+            ctrl &= ~E1000_CTRL_FD;
+
+        if (phy_data & 0x2000)
+            ctrl |= E1000_CTRL_SPD_100;
+        else
+            ctrl |= E1000_CTRL_SPD_10;
+
+        e1000_config_collision_dist(hw);
+        break;
+    case e1000_phy_rtl8201e:
+           ret_val = e1000_read_phy_reg(hw, PHY_CTRL, &phy_data);
+           if (ret_val)
+               return ret_val;
+           if (phy_data & 0x0100)
+               ctrl |= E1000_CTRL_FD;
+           else
+               ctrl &= ~E1000_CTRL_FD;
+           if (phy_data & 0x2000)
+               ctrl |= E1000_CTRL_SPD_100;
+           else
+               ctrl |= E1000_CTRL_SPD_10;
+           e1000_config_collision_dist(hw);
+           break;
+    default:
 	/* Set up duplex in the Device Control and Transmit Control
 	 * registers depending on negotiated values.
 	 */
@@ -1891,7 +2101,7 @@ static s32 e1000_config_mac_to_phy(struct e1000_hw *hw)
 		ctrl |= E1000_CTRL_SPD_1000;
 	else if ((phy_data & M88E1000_PSSR_SPEED) == M88E1000_PSSR_100MBS)
 		ctrl |= E1000_CTRL_SPD_100;
-
+    	}
 	/* Write the configured values back to the Device Control Reg. */
 	ew32(CTRL, ctrl);
 	return E1000_SUCCESS;
@@ -2351,6 +2561,8 @@ s32 e1000_check_for_link(struct e1000_hw *hw)
 		ret_val = e1000_read_phy_reg(hw, PHY_STATUS, &phy_data);
 		if (ret_val)
 			return ret_val;
+		
+		hw->cegbe_is_link_up = (phy_data & MII_SR_LINK_STATUS) != 0;
 
 		if (phy_data & MII_SR_LINK_STATUS) {
 			hw->get_link_status = false;
@@ -2401,7 +2613,7 @@ s32 e1000_check_for_link(struct e1000_hw *hw)
 		 * speed/duplex on the MAC to the current PHY speed/duplex
 		 * settings.
 		 */
-		if (hw->mac_type >= e1000_82544)
+        if (hw->mac_type >= e1000_82544 && hw->mac_type != e1000_cegbe)
 			e1000_config_collision_dist(hw);
 		else {
 			ret_val = e1000_config_mac_to_phy(hw);
@@ -2719,6 +2931,12 @@ s32 e1000_read_phy_reg(struct e1000_hw *hw, u32 reg_addr, u16 *phy_data)
 
 	e_dbg("e1000_read_phy_reg");
 
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+    const u32 phy_addr = 0x15;
+    *phy_data= 0x3e;
+    return E1000_SUCCESS;
+#endif
+
 	if ((hw->phy_type == e1000_phy_igp) &&
 	    (reg_addr > MAX_PHY_MULTI_PAGE_REG)) {
 		ret_val = e1000_write_phy_reg_ex(hw, IGP01E1000_PHY_PAGE_SELECT,
@@ -2738,7 +2956,13 @@ static s32 e1000_read_phy_reg_ex(struct e1000_hw *hw, u32 reg_addr,
 {
 	u32 i;
 	u32 mdic = 0;
-	const u32 phy_addr = 1;
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+    const u32 phy_addr = 0x15;
+    *phy_data= 0x3e;
+    return E1000_SUCCESS;
+#else 
+	const u32 phy_addr = (hw->mac_type == e1000_cegbe)?hw->phy_addr:1;
+#endif
 
 	e_dbg("e1000_read_phy_reg_ex");
 
@@ -2752,6 +2976,35 @@ static s32 e1000_read_phy_reg_ex(struct e1000_hw *hw, u32 reg_addr,
 		 * Control register.  The MAC will take care of interfacing with the
 		 * PHY to retrieve the desired data.
 		 */
+		  if ( hw->mac_type == e1000_cegbe ) {
+			mdic = ((reg_addr << E1000_MDIC_REG_SHIFT) |
+                    (phy_addr << E1000_MDIC_PHY_SHIFT) |
+                    (INTEL_CE_GBE_MDIC_OP_READ) |
+                    (INTEL_CE_GBE_MDIC_GO));
+    
+			writel(mdic, E1000_MDIO_CMD);
+    
+			/* Poll the ready bit to see if the MDI read completed */
+			for(i = 0; i < 64; i++) {
+				udelay(50);
+				mdic = readl(E1000_MDIO_CMD);
+				if(!(mdic & INTEL_CE_GBE_MDIC_GO)) break;
+			}			
+            
+			if(mdic & INTEL_CE_GBE_MDIC_GO) {
+				e_dbg("MDI Read did not complete\n");
+				return -E1000_ERR_PHY;
+			}
+			
+			mdic = readl(E1000_MDIO_STS);
+			if(mdic & INTEL_CE_GBE_MDIC_READ_ERROR) {
+				e_dbg("MDI Read Error\n");
+			return -E1000_ERR_PHY;
+			}
+        	*phy_data = (uint16_t) mdic;
+    
+		} else {
+
 		mdic = ((reg_addr << E1000_MDIC_REG_SHIFT) |
 			(phy_addr << E1000_MDIC_PHY_SHIFT) |
 			(E1000_MDIC_OP_READ));
@@ -2774,6 +3027,7 @@ static s32 e1000_read_phy_reg_ex(struct e1000_hw *hw, u32 reg_addr,
 			return -E1000_ERR_PHY;
 		}
 		*phy_data = (u16) mdic;
+			}
 	} else {
 		/* We must first send a preamble through the MDIO pin to signal the
 		 * beginning of an MII instruction.  This is done by sending 32
@@ -2821,6 +3075,10 @@ s32 e1000_write_phy_reg(struct e1000_hw *hw, u32 reg_addr, u16 phy_data)
 
 	e_dbg("e1000_write_phy_reg");
 
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+    return E1000_SUCCESS;
+#endif
+
 	if ((hw->phy_type == e1000_phy_igp) &&
 	    (reg_addr > MAX_PHY_MULTI_PAGE_REG)) {
 		ret_val = e1000_write_phy_reg_ex(hw, IGP01E1000_PHY_PAGE_SELECT,
@@ -2840,7 +3098,7 @@ static s32 e1000_write_phy_reg_ex(struct e1000_hw *hw, u32 reg_addr,
 {
 	u32 i;
 	u32 mdic = 0;
-	const u32 phy_addr = 1;
+	const u32 phy_addr = (hw->mac_type == e1000_cegbe)?hw->phy_addr:1;
 
 	e_dbg("e1000_write_phy_reg_ex");
 
@@ -2854,6 +3112,28 @@ static s32 e1000_write_phy_reg_ex(struct e1000_hw *hw, u32 reg_addr,
 		 * for the PHY register in the MDI Control register.  The MAC will take
 		 * care of interfacing with the PHY to send the desired data.
 		 */
+		 if ( hw->mac_type == e1000_cegbe ) {
+		   mdic = (((uint32_t) phy_data) |
+                    (reg_addr << E1000_MDIC_REG_SHIFT) |
+                    (phy_addr << E1000_MDIC_PHY_SHIFT) |
+                    (INTEL_CE_GBE_MDIC_OP_WRITE) |
+                    (INTEL_CE_GBE_MDIC_GO ));
+    
+			writel(mdic, E1000_MDIO_CMD);
+
+            /* Poll the ready bit to see if the MDI read completed */
+            for(i = 0; i < 640; i++) {
+                udelay(5);
+                mdic = readl(E1000_MDIO_CMD);
+                if(!(mdic & INTEL_CE_GBE_MDIC_GO)) break;
+            }
+
+            if(mdic & INTEL_CE_GBE_MDIC_GO) {
+                e_dbg("MDI Write did not complete\n");
+                return -E1000_ERR_PHY;
+            }
+
+		} else {
 		mdic = (((u32) phy_data) |
 			(reg_addr << E1000_MDIC_REG_SHIFT) |
 			(phy_addr << E1000_MDIC_PHY_SHIFT) |
@@ -2872,6 +3152,7 @@ static s32 e1000_write_phy_reg_ex(struct e1000_hw *hw, u32 reg_addr,
 			e_dbg("MDI Write did not complete\n");
 			return -E1000_ERR_PHY;
 		}
+			}
 	} else {
 		/* We'll need to use the SW defined pins to shift the write command
 		 * out to the PHY. We first send a preamble to the PHY to signal the
@@ -3048,6 +3329,9 @@ static s32 e1000_detect_gig_phy(struct e1000_hw *hw)
 		if (hw->phy_id == M88E1011_I_PHY_ID)
 			match = true;
 		break;
+	case e1000_cegbe:
+		if (hw->phy_id == RTL8211B_PHY_ID || hw->phy_id == RTL8201N_PHY_ID || hw->phy_id == RTL8201E_PHY_ID ) match = true;
+		break;//RTL 8211B and 8211D has the same PHY ID
 	case e1000_82541:
 	case e1000_82541_rev_2:
 	case e1000_82547:
@@ -3291,6 +3575,8 @@ s32 e1000_phy_get_info(struct e1000_hw *hw, struct e1000_phy_info *phy_info)
 
 	if (hw->phy_type == e1000_phy_igp)
 		return e1000_phy_igp_get_info(hw, phy_info);
+    else if(hw->phy_type == e1000_phy_rtl8211b || hw->phy_type == e1000_phy_rtl8201n || hw->phy_type == e1000_phy_rtl8201e || hw->phy_type == e1000_phy_rtl8211d)
+    	return E1000_SUCCESS;
 	else
 		return e1000_phy_m88_get_info(hw, phy_info);
 }
@@ -3298,6 +3584,10 @@ s32 e1000_phy_get_info(struct e1000_hw *hw, struct e1000_phy_info *phy_info)
 s32 e1000_validate_mdi_setting(struct e1000_hw *hw)
 {
 	e_dbg("e1000_validate_mdi_settings");
+
+#ifdef SAMSUNG_SEC_UPC_NOPHY
+    return E1000_SUCCESS;
+#endif
 
 	if (!hw->autoneg && (hw->mdix == 0 || hw->mdix == 3)) {
 		e_dbg("Invalid MDI setting detected\n");
@@ -3317,9 +3607,12 @@ s32 e1000_validate_mdi_setting(struct e1000_hw *hw)
 s32 e1000_init_eeprom_params(struct e1000_hw *hw)
 {
 	struct e1000_eeprom_info *eeprom = &hw->eeprom;
-	u32 eecd = er32(EECD);
+	u32 eecd = 0;
 	s32 ret_val = E1000_SUCCESS;
 	u16 eeprom_size;
+
+	if(hw->mac_type != e1000_cegbe)
+		eecd = er32(EECD);
 
 	e_dbg("e1000_init_eeprom_params");
 
@@ -3741,6 +4034,14 @@ static s32 e1000_do_read_eeprom(struct e1000_hw *hw, u16 offset, u16 words,
 	u32 i = 0;
 
 	e_dbg("e1000_read_eeprom");
+	
+	if( hw->mac_type ==  e1000_cegbe ){
+		if(gbe_config_read_words(GBE_CONFIG_BASE_VIRT, offset, words, data)){
+			return -E1000_ERR_EEPROM;
+		}
+
+		return E1000_SUCCESS;
+	}
 
 	/* If eeprom is not yet detected, do so now */
 	if (eeprom->word_size == 0)
@@ -3903,6 +4204,14 @@ static s32 e1000_do_write_eeprom(struct e1000_hw *hw, u16 offset, u16 words,
 	s32 status = 0;
 
 	e_dbg("e1000_write_eeprom");
+	
+	if( hw->mac_type ==  e1000_cegbe ){
+		if(gbe_config_write_words(GBE_CONFIG_BASE_VIRT, offset, words, data)){
+			return -E1000_ERR_EEPROM;
+		}
+	
+	   	return E1000_SUCCESS;
+	}
 
 	/* If eeprom is not yet detected, do so now */
 	if (eeprom->word_size == 0)
